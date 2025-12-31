@@ -1,7 +1,11 @@
 import sqlite3
 import logging
+import uuid
 
 logging.basicConfig(level=logging.INFO)
+
+def generate_ID() -> str:
+    return str(uuid.uuid4())
 
 class Database:
     def __init__(self, file: str = "data.db"):
