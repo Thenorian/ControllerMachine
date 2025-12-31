@@ -1,0 +1,5 @@
+# client/requirements-client.txt
+pystray==0.19.5
+Pillow==10.4.0
+pywin32>=307; sys_platform == "win32"
+pycups==2.0.1; sys_platform == "linux"
