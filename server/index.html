@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Print Service Wiki</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Fonte moderna -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg: #0f172a;
+            --bg-soft: #111827;
+            --card: #1e293b;
+            --text: #e5e7eb;
+            --muted: #94a3b8;
+            --primary: #38bdf8;
+            --accent: #22c55e;
+            --danger: #ef4444;
+            --border: #334155;
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+        }
+
+        /* Sidebar */
+        aside {
+            width: 260px;
+            background: var(--bg-soft);
+            border-right: 1px solid var(--border);
+            padding: 24px;
+            position: fixed;
+            height: 100vh;
+        }
+
+        aside h1 {
+            font-size: 18px;
+            margin-bottom: 24px;
+            color: var(--primary);
+        }
+
+        aside nav a {
+            display: block;
+            padding: 10px 12px;
+            color: var(--text);
+            text-decoration: none;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+
+        aside nav a:hover {
+            background: var(--card);
+        }
+
+        /* Main */
+        main {
+            margin-left: 260px;
+            padding: 40px;
+            width: 100%;
+        }
+
+        section {
+            margin-bottom: 48px;
+        }
+
+        h2 {
+            font-size: 24px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+
+        h3 {
+            font-size: 18px;
+            margin-top: 24px;
+            margin-bottom: 8px;
+        }
+
+        p {
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 16px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+        }
+
+        code, pre {
+            background: #020617;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            color: #a5f3fc;
+            font-size: 13px;
+            overflow-x: auto;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent);
+        }
+
+        footer {
+            margin-top: 80px;
+            font-size: 12px;
+            color: var(--muted);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<aside>
+    <h1>🖨 Print Service</h1>
+    <nav>
+        <a href="#overview">Visão Geral</a>
+        <a href="#architecture">Arquitetura</a>
+        <a href="#ports">Portas & Serviços</a>
+        <a href="#api">API</a>
+        <a href="#status">Status</a>
+        <a href="#security">Segurança</a>
+        <a href="#faq">FAQ</a>
+    </nav>
+</aside>
+
+<main>
+
+<section id="overview">
+    <h2>Visão Geral</h2>
+    <p>
+        Este serviço de impressão foi projetado como uma alternativa moderna ao CUPS,
+        oferecendo uma API REST para gerenciamento de filas, impressoras e trabalhos
+        de impressão, com integração nativa a aplicações web e ambientes corporativos.
+    </p>
+
+    <div class="card">
+        <strong>Objetivos principais:</strong>
+        <ul>
+            <li>Gerenciamento centralizado de impressão</li>
+            <li>API REST documentada</li>
+            <li>Monitoramento de status em tempo real</li>
+            <li>Integração com sistemas externos</li>
+        </ul>
+    </div>
+</section>
+
+<section id="architecture">
+    <h2>Arquitetura</h2>
+    <p>
+        A aplicação é composta por um backend FastAPI responsável pela API,
+        orquestração das filas de impressão e comunicação com os drivers do sistema.
+    </p>
+
+    <div class="card">
+        <pre>
+[ Cliente ]
+     |
+     | HTTP / REST
+     v
+[ FastAPI ]
+     |
+     | IPC / Drivers
+     v
+[ Sistema de Impressão ]
+        </pre>
+    </div>
+</section>
+
+<section id="ports">
+    <h2>Portas & Serviços</h2>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Interface Web</h3>
+            <p>Portal principal da aplicação</p>
+            <code>TCP 7689</code>
+        </div>
+
+        <div class="card">
+            <h3>API REST</h3>
+            <p>Endpoints para integração e automação</p>
+            <code>TCP 7688</code>
+        </div>
+    </div>
+</section>
+
+<section id="api">
+    <h2>API</h2>
+
+    <div class="card">
+        <h3>Documentação</h3>
+        <p>
+            A API segue o padrão OpenAPI e pode ser acessada diretamente pelo endpoint:
+        </p>
+        <code>/ip/docs</code>
+    </div>
+
+    <div class="card">
+        <h3>Exemplo de Endpoint</h3>
+        <pre>
+GET /api/v1/printers
+
+Response:
+[
+  {
+    "id": "printer01",
+    "name": "HP-LaserJet",
+    "status": "idle"
+  }
+]
+        </pre>
+    </div>
+</section>
+
+<section id="status">
+    <h2>Status do Serviço</h2>
+
+    <div class="card">
+        <div class="status">
+            <span class="dot"></span>
+            Serviço operacional
+        </div>
+        <p>Última verificação: em tempo real</p>
+    </div>
+</section>
+
+<section id="security">
+    <h2>Segurança</h2>
+    <p>
+        O serviço suporta autenticação baseada em token e pode ser integrado
+        a mecanismos de autenticação corporativa.
+    </p>
+
+    <div class="card">
+        <ul>
+            <li>Autenticação via API Key / JWT</li>
+            <li>Controle de acesso por função</li>
+            <li>Logs de auditoria</li>
+        </ul>
+    </div>
+</section>
+
+<section id="faq">
+    <h2>FAQ</h2>
+
+    <div class="card">
+        <h3>Este serviço substitui o CUPS?</h3>
+        <p>
+            Ele pode operar como camada de abstração ou substituição parcial,
+            dependendo da configuração e do ambiente.
+        </p>
+
+        <h3>Funciona em contêiner?</h3>
+        <p>
+            Sim. A aplicação foi projetada para rodar em Docker e ambientes orquestrados.
+        </p>
+    </div>
+</section>
+
+<footer>
+    Print Service • Documentação Interna • FastAPI
+</footer>
+
+</main>
+
+</body>
+</html>
