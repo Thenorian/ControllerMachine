@@ -27,8 +27,8 @@ class APICore(Database):
             action="fetchall"
         )
 
-    def company_register(self, company_name: str):
-        company_id = generate_id()
+    def company_register(self, company_name: str, force_id:str=None):
+        company_id = force_id if force_id else generate_id()
         auth_key = generate_id()
 
         status, error = self.cmd(
@@ -73,7 +73,7 @@ class APICore(Database):
         status_print, data_print = self.cmd(
             """
                 SELECT 
-                    printer_id, client_id, last_ip, status, status_payload, last_connected_at, created_at 
+                    printer_id, name, client_id, last_ip, status, status_payload, last_connected_at, created_at 
                 FROM 
                     printers 
                 WHERE 
@@ -101,29 +101,46 @@ class APICore(Database):
             data_result['printers'].append(
                 {
                     "id": printer[0],
-                    "client_id": printer[1],
-                    "last_ip": printer[2],
-                    "status": printer[3],
-                    "status_payload": printer[4],
-                    "last_connection": printer[5],
-                    "created_at": printer[6] 
+                    "name": printe[1],
+                    "client_id": printer[3],
+                    "last_ip": printer[4],
+                    "status": printer[5],
+                    "status_payload": printer[6],
+                    "last_connection": printer[7],
+                    "created_at": printer[8] 
                 }
             )
 
         return True, data_result
 
-    def printer_register(self, company_id:str, last_ip:str=""):
+    def printer_register(self, company_id:str, name:str, last_ip:str=""):
+        printer_id = generate_id()
         client_id = generate_id()
 
         return self.cmd(
             command="""
             INSERT INTO printers 
-                (company_id, client_id, last_ip) 
+                (printer_id, company_id, client_id, last_ip) 
             VALUES 
-                (?, ?, ?)
+                (?, ?, ?, ?)
             """,
-            arguments=(company_id, client_id, last_ip,)
+            arguments=(company_id, name, client_id, last_ip,)
         )
+
+    def printer_delete(self, printer_id: str):
+        status, error = self.cmd(
+            command="""
+                UPDATE printers
+                SET 
+                    status = 'deleted'
+                WHERE 
+                    printer_id = ?
+            """,
+            arguments=(printer_id,),
+        )
+
+        return status, error
+
 
 # +=====================+
 # |                     |
@@ -137,7 +154,7 @@ class APICore(Database):
 if __name__ == "__main__":
     api_core = APICore()
     
-    # print(api_core.company_register("Thenorian"))
-    # print(api_core.companies_all_list())
-    # print(api_core.printer_register("2aa2e597-faa9-42f8-8b6d-d1df62545571"))
-    # print(api_core.company_get_data("2aa2e597-faa9-42f8-8b6d-d1df62545571"))
+    print(api_core.company_register("Thenorian", force_id="2aa2e597-faa9-42f8-8b6d-d1df62545571"))
+    print(api_core.companies_all_list())
+    print(api_core.printer_register("2aa2e597-faa9-42f8-8b6d-d1df62545571", "Teste"))
+    print(api_core.company_get_data("2aa2e597-faa9-42f8-8b6d-d1df62545571"))

@@ -72,6 +72,7 @@ class Database:
                 printer_id TEXT PRIMARY KEY,
                 company_id TEXT NOT NULL,
 
+                name TEXT NOT NULL,
                 client_id TEXT NOT NULL UNIQUE,
                 last_ip TEXT,
 
