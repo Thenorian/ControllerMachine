@@ -4,7 +4,7 @@ import uuid
 
 logging.basicConfig(level=logging.INFO)
 
-def generate_ID() -> str:
+def generate_id() -> str:
     return str(uuid.uuid4())
 
 class Database:
@@ -27,10 +27,14 @@ class Database:
         self.conn_db = None
         self.cursor = None
 
-    def cmd(self, command, action: str = 'commit'):
+    def cmd(self, command, arguments=None, action: str = 'commit'):
         try:
             self.connect()
-            self.cursor.execute(command)
+
+            if arguments is not None:
+                self.cursor.execute(command, arguments)
+            else:
+                self.cursor.execute(command)
 
             if action == "fetchone":
                 return True, self.cursor.fetchone()
@@ -48,6 +52,7 @@ class Database:
 
         finally:
             self.close()
+
 
     def create_tables(self):
         logging.info("Criando tabelas...")
