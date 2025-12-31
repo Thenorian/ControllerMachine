@@ -10,6 +10,14 @@ class APICore(Database):
     def __init__(self):
         super().__init__()
 
+    def company_verify(self, company_id):
+        status, _ = self.cmd('SELECT company_id FROM companies WHERE company_id = ?', (company_id,), "fetchone")
+
+        if status:
+            return True, None
+
+        return False, _
+
     def companies_all_list(self):
         return self.cmd("""
                 SELECT * 
@@ -42,6 +50,10 @@ class APICore(Database):
         }
 
     def company_get_data(self, company_id):
+        status, _ = self.company_verify(company_id)
+        if not status:
+            return _
+
         status_comp, data_comp = self.cmd(
             """
                 SELECT 
@@ -55,10 +67,13 @@ class APICore(Database):
             action="fetchone"
         )
 
+        if not status_comp:
+            return status_comp, data_comp
+
         status_print, data_print = self.cmd(
             """
                 SELECT 
-                    printer_id, hostname, last_ip, status, status_payload, last_connected_at, created_at 
+                    printer_id, client_id, last_ip, status, status_payload, last_connected_at, created_at 
                 FROM 
                     printers 
                 WHERE 
@@ -67,6 +82,9 @@ class APICore(Database):
             arguments=(company_id,),
             action="fetchall"
         )
+
+        if not status_print:
+            return status_print, data_print
 
         data_result = {
             "company": {
@@ -82,23 +100,30 @@ class APICore(Database):
         for printer in data_print:
             data_result['printers'].append(
                 {
-                    "id": data_print[0],
-                    "hostname": data_print[1],
-                    "last_ip": data_print[2],
-                    "status": data_print[3],
-                    "status_payload": data_print[4],
-                    "last_connection": data_print[5],
-                    "created_at": data_print[6] 
+                    "id": printer[0],
+                    "client_id": printer[1],
+                    "last_ip": printer[2],
+                    "status": printer[3],
+                    "status_payload": printer[4],
+                    "last_connection": printer[5],
+                    "created_at": printer[6] 
                 }
             )
 
-        if not status_comp:
-            return status_comp, data_comp
-
-        elif not status_print:
-            return status_print, data_print
-
         return True, data_result
+
+    def printer_register(self, company_id:str, last_ip:str=""):
+        client_id = generate_id()
+
+        return self.cmd(
+            command="""
+            INSERT INTO printers 
+                (company_id, client_id, last_ip) 
+            VALUES 
+                (?, ?, ?)
+            """,
+            arguments=(company_id, client_id, last_ip,)
+        )
 
 # +=====================+
 # |                     |
@@ -111,6 +136,8 @@ class APICore(Database):
 # +=====================+
 if __name__ == "__main__":
     api_core = APICore()
+    
     # print(api_core.company_register("Thenorian"))
     # print(api_core.companies_all_list())
-    print(api_core.company_get_data("92a6259b-80c0-4633-be2a-d81a44e85a6e"))
+    # print(api_core.printer_register("2aa2e597-faa9-42f8-8b6d-d1df62545571"))
+    # print(api_core.company_get_data("2aa2e597-faa9-42f8-8b6d-d1df62545571"))

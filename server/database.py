@@ -72,7 +72,7 @@ class Database:
                 printer_id TEXT PRIMARY KEY,
                 company_id TEXT NOT NULL,
 
-                hostname TEXT,
+                client_id TEXT NOT NULL UNIQUE,
                 last_ip TEXT,
 
                 status TEXT NOT NULL DEFAULT 'offline',
@@ -96,6 +96,11 @@ class Database:
         self.cmd('''
             CREATE INDEX IF NOT EXISTS idx_printers_status
             ON printers(status)
+        ''')
+
+        self.cmd('''
+            CREATE INDEX IF NOT EXISTS idx_client_id
+            ON printers(client_id)
         ''')
 
         self.cmd('''
