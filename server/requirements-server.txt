@@ -1,4 +1,6 @@
-# server/requirements-server.txt
-fastapi==0.115.0
-uvicorn==0.30.6
-pydantic==2.9.2
+# connector.py usa só a biblioteca padrão do Python (socket, threading, json).
+# Nenhuma dependência externa é necessária para embutir no Simple ERP.
+#
+# Este arquivo existe só para o example_usage.py, que também não usa nada
+# além da biblioteca padrão (sqlite3, logging) — mantido de propósito vazio
+# de deps externas para o connector continuar copy-paste-friendly.

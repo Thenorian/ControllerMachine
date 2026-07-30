@@ -1,2 +1,4 @@
 __pycache__/
 data.db
+client/config.json
+server/example_controllers.db

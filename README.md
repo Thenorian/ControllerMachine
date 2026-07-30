@@ -1,60 +1,55 @@
-# Sistema de Impressão Remota
+# Controller Machine
 
-Sistema simples e robusto para enviar impressões de um servidor externo para impressoras locais em máquinas clientes (Windows ou Linux).
+Programa que roda na loja do cliente e dá acesso ao Simple ERP a impressoras
+(comuns e fiscais/NFC-e) e balanças da rede local — sem o Simple ERP precisar
+estar na mesma rede, e contornando CGNAT.
 
-## Funcionalidades
+Documentação completa (arquitetura, protocolo, schema de `config.json`,
+regra de IDs) está no vault do Obsidian da Thenorian, handoff "Controller
+Machine" na pasta `Documentação/interna/Simple  ERP/`.
 
-- Envio de PDF, texto ou dados raw (ESC/POS, ZPL, etc.)
-- Fila de impressão com reconexão automática
-- Status da impressora
-- Autenticação por UUID
-- Agrupamento por empresa/grupo
-- Interface web simples + API REST
-- Cliente roda em segundo plano (ícone na bandeja)
+## Componentes
 
-## Instalação
+- **`server/`** — não é um servidor separado. É `connector.py`
+  (`ControllerConnector`), uma classe que o **Simple ERP copia pro próprio
+  código** e roda numa thread própria — ver `server/README.md`.
+- **`client/`** — o Controller Machine em si, roda na loja. Windows: ícone
+  na bandeja + janela de cadastro. Linux: serviço systemd (`python main.py
+  --install-service`).
 
-### 1. Servidor
+## Testar localmente (sem o Simple ERP de verdade)
+
+Terminal 1 — sobe um connector de teste:
 
 ```bash
 cd server
-pip install -r requirements-server.txt
+python example_usage.py
+```
+
+Terminal 2 — client, configurado pra apontar pro connector de teste
+(controller_id/secret de exemplo já cadastrados pelo `example_usage.py`):
+
+```bash
+cd client
+pip install -r requirements-client.txt
 python main.py
 ```
 
-O servidor vai gerar e exibir duas API Keys de exemplo.
-Acesse a interface web em http://SEU_IP:7689
+No Windows, isso abre o ícone na bandeja + a janela de cadastro (some pra
+bandeja sozinha se já tiver dispositivo cadastrado). No Linux, roda em
+primeiro plano até você instalar como serviço.
 
-### 2. Cliente (Windows ou Linux)
-```Bash
-cd client
-pip install -r requirements-client.txt
-```
-#### Linux - dependências do sistema:
+### Linux — dependências do sistema
 
-```Bash
+```bash
 sudo apt install libcups2-dev python3-gi gir1.2-gtk-3.0
-````
-Edite o final do arquivo cliente.py com:
-
-CLIENT_ID: nome único da máquina/loja
-AUTH_KEY: um dos UUIDs gerados pelo servidor
-GROUP: mesmo grupo da API key que vai enviar jobs
-
-Execute:
-```Bash
-python cliente.py
 ```
-O programa ficará em segundo plano (ícone verde na bandeja do Windows ou Linux).
-### Enviar uma impressão (exemplo com curl)
 
-```Bash
-curl -X POST http://SEU_IP:8080/api/send_job \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "uuid-gerado-pelo-servidor",
-    "group": "empresa1",
-    "type": "pdf",
-    "data": "'$(base64 -w 0 seu_arquivo.pdf)'"
-  }'
-```
+## Balança — arquivos de exemplo
+
+`Exemplos Balança/` tem arquivos reais gerados por diferentes marcas de
+balança (Ramuza/Atena, Toledo Prix, Filizola, Toledo MGV5) — é a partir
+deles que os formatters em `client/devices/scale/` foram construídos. O
+formatter do Toledo MGV5 foi conferido byte a byte contra esses exemplos; os
+demais ainda são esqueleto (ver documentação no Obsidian pra detalhes de
+quais marcas estão prontas).
