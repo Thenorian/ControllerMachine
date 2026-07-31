@@ -83,6 +83,19 @@ def _dispatch_scale(device: dict, job: dict) -> None:
         import serial
         with serial.Serial(connection["serial_port"], connection.get("baudrate", 9600), timeout=15) as ser:
             ser.write(table)
+    elif connection["kind"] == "file":
+        # Balanças que importam a tabela de produtos de um arquivo (ex.:
+        # Toledo Prix/MGV5, Ramuza/Atena) — path costuma ser uma pasta local
+        # ou um compartilhamento de rede que o equipamento fica observando.
+        # Grava num arquivo temporário no mesmo diretório e troca de nome no
+        # final (os.replace é atômico) pra nunca deixar a balança ler o
+        # arquivo pela metade.
+        import os
+        path = connection["path"]
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "wb") as f:
+            f.write(table)
+        os.replace(tmp_path, path)
     else:
         raise ValueError(f"conexão não suportada para balança: {connection}")
 

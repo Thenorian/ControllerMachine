@@ -221,6 +221,7 @@ class ControllerWindow(tk.Tk):
 def _choose_from_list(parent, title: str, options: list[str]) -> str | None:
     top = tk.Toplevel(parent)
     top.title(title)
+    top.transient(parent)  # amarra ao pai — some/volta junto, fica na frente dele
     listbox = tk.Listbox(top, width=50, height=10)
     for option in options:
         listbox.insert(tk.END, option)
@@ -235,9 +236,21 @@ def _choose_from_list(parent, title: str, options: list[str]) -> str | None:
         top.destroy()
 
     tk.Button(top, text="Selecionar", command=confirm).pack(pady=(0, 10))
-    top.grab_set()
+    _make_dialog_visible(top)
     parent.wait_window(top)
     return result["value"]
+
+
+def _make_dialog_visible(top: tk.Toplevel) -> None:
+    """Garante que o Toplevel apareça na frente e com foco antes de travar
+    o grab — chamar grab_set() antes da janela estar de fato visível pode
+    tanto estourar "grab failed: window not viewable" quanto (silenciosamente,
+    dependendo do gerenciador de janelas) deixar o popup aberto atrás da
+    janela principal, dando a impressão de que o botão não fez nada."""
+    top.wait_visibility()
+    top.grab_set()
+    top.lift()
+    top.focus_force()
 
 
 class NetworkDeviceDialog(tk.Toplevel):
@@ -263,33 +276,84 @@ class NetworkDeviceDialog(tk.Toplevel):
         self.brand_entry.insert(0, "generic")
         self.brand_entry.grid(row=2, column=1, padx=5, pady=2)
 
-        tk.Label(self, text="IP:").grid(row=3, column=0, sticky="w", padx=5, pady=2)
-        self.host_entry = tk.Entry(self)
-        self.host_entry.grid(row=3, column=1, padx=5, pady=2)
+        tk.Label(self, text="Conexão:").grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        self.kind_combo = ttk.Combobox(self, values=["tcp", "file"], state="readonly", width=17)
+        self.kind_combo.current(0)
+        self.kind_combo.grid(row=3, column=1, padx=5, pady=2)
+        self.kind_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_kind_fields())
 
-        tk.Label(self, text="Porta:").grid(row=4, column=0, sticky="w", padx=5, pady=2)
-        self.port_entry = tk.Entry(self)
+        # kind="tcp" — impressora/balança de rede (IP + porta)
+        self.tcp_frame = tk.Frame(self)
+        tk.Label(self.tcp_frame, text="IP:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.host_entry = tk.Entry(self.tcp_frame)
+        self.host_entry.grid(row=0, column=1, padx=5, pady=2)
+        tk.Label(self.tcp_frame, text="Porta:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.port_entry = tk.Entry(self.tcp_frame)
         self.port_entry.insert(0, "9100")
-        self.port_entry.grid(row=4, column=1, padx=5, pady=2)
+        self.port_entry.grid(row=1, column=1, padx=5, pady=2)
+
+        # kind="file" — balança que lê a tabela de produtos de um arquivo
+        # (ex.: Toledo Prix/MGV5, Ramuza/Atena) — o caminho normalmente é
+        # uma pasta local ou compartilhamento de rede (\\ip\pasta\arquivo.txt)
+        # que o equipamento/software da balança fica observando.
+        self.file_frame = tk.Frame(self)
+        tk.Label(self.file_frame, text="Caminho do arquivo:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.path_entry = tk.Entry(self.file_frame, width=30)
+        self.path_entry.grid(row=0, column=1, padx=5, pady=2)
+        tk.Button(self.file_frame, text="...", width=3, command=self._browse_path).grid(row=0, column=2, padx=(2, 5))
+
+        self.tcp_frame.grid(row=4, column=0, columnspan=2, sticky="w")
+        self._update_kind_fields()
 
         tk.Button(self, text="Adicionar", command=self._confirm).grid(row=5, column=0, columnspan=2, pady=10)
 
+        self.transient(parent)
+        _make_dialog_visible(self)
+
+    def _update_kind_fields(self) -> None:
+        if self.kind_combo.get() == "tcp":
+            self.file_frame.grid_forget()
+            self.tcp_frame.grid(row=4, column=0, columnspan=2, sticky="w")
+        else:
+            self.tcp_frame.grid_forget()
+            self.file_frame.grid(row=4, column=0, columnspan=2, sticky="w")
+
+    def _browse_path(self) -> None:
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação da balança")
+        if path:
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, path)
+
     def _confirm(self) -> None:
         label = self.label_entry.get().strip()
-        host = self.host_entry.get().strip()
-        if not label or not host:
-            messagebox.showwarning("Campos obrigatórios", "Preencha ao menos Label e IP.")
+        kind = self.kind_combo.get()
+        if not label:
+            messagebox.showwarning("Campos obrigatórios", "Preencha o Label.")
             return
-        try:
-            port = int(self.port_entry.get())
-        except ValueError:
-            messagebox.showwarning("Porta inválida", "A porta precisa ser um número.")
-            return
+
+        if kind == "tcp":
+            host = self.host_entry.get().strip()
+            if not host:
+                messagebox.showwarning("Campos obrigatórios", "Preencha o IP.")
+                return
+            try:
+                port = int(self.port_entry.get())
+            except ValueError:
+                messagebox.showwarning("Porta inválida", "A porta precisa ser um número.")
+                return
+            connection = {"kind": "tcp", "host": host, "port": port}
+        else:
+            path = self.path_entry.get().strip()
+            if not path:
+                messagebox.showwarning("Campos obrigatórios", "Preencha o caminho do arquivo.")
+                return
+            connection = {"kind": "file", "path": path}
 
         self.result = {
             "label": label,
             "type_": self.type_combo.get(),
             "brand": self.brand_entry.get().strip() or "generic",
-            "connection": {"kind": "tcp", "host": host, "port": port},
+            "connection": connection,
         }
         self.destroy()
