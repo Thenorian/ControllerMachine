@@ -36,28 +36,43 @@ class ControllerWindow(tk.Tk):
         frame.pack(fill="x", padx=10, pady=10)
 
         tk.Label(frame, text="Controller ID:").grid(row=0, column=0, sticky="w")
-        tk.Entry(frame, width=40).grid(row=0, column=1, sticky="w", columnspan=3)
-        entry = frame.grid_slaves(row=0, column=1)[0]
-        entry.insert(0, self.catalog.controller_id)
-        entry.configure(state="readonly")
-
-        tk.Label(frame, text="Servidor:").grid(row=1, column=0, sticky="w")
-        self.host_entry = tk.Entry(frame, width=24)
-        self.host_entry.insert(0, self.catalog.connector_host)
-        self.host_entry.grid(row=1, column=1, sticky="w")
-
-        tk.Label(frame, text="Porta:").grid(row=1, column=2, sticky="w")
-        self.port_entry = tk.Entry(frame, width=8)
-        self.port_entry.insert(0, str(self.catalog.connector_port))
-        self.port_entry.grid(row=1, column=3, sticky="w")
-
-        tk.Button(frame, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
-            row=1, column=4, sticky="w", padx=(10, 0)
+        id_entry = tk.Entry(frame, width=40)
+        id_entry.grid(row=0, column=1, sticky="w", columnspan=3)
+        id_entry.insert(0, self.catalog.controller_id)
+        id_entry.configure(state="readonly")
+        tk.Button(frame, text="Copiar", command=lambda: self._copy_to_clipboard(self.catalog.controller_id)).grid(
+            row=0, column=4, sticky="w", padx=(10, 0)
         )
 
-        tk.Label(frame, text="Status:").grid(row=2, column=0, sticky="w")
+        tk.Label(frame, text="Secret:").grid(row=1, column=0, sticky="w")
+        secret_entry = tk.Entry(frame, width=40, show="*")
+        secret_entry.grid(row=1, column=1, sticky="w", columnspan=3)
+        secret_entry.insert(0, self.catalog.secret)
+        secret_entry.configure(state="readonly")
+        tk.Button(frame, text="Copiar", command=lambda: self._copy_to_clipboard(self.catalog.secret)).grid(
+            row=1, column=4, sticky="w", padx=(10, 0)
+        )
+        tk.Button(frame, text="Mostrar", command=lambda: self._toggle_secret(secret_entry)).grid(
+            row=1, column=5, sticky="w", padx=(5, 0)
+        )
+
+        tk.Label(frame, text="Servidor:").grid(row=2, column=0, sticky="w")
+        self.host_entry = tk.Entry(frame, width=24)
+        self.host_entry.insert(0, self.catalog.connector_host)
+        self.host_entry.grid(row=2, column=1, sticky="w")
+
+        tk.Label(frame, text="Porta:").grid(row=2, column=2, sticky="w")
+        self.port_entry = tk.Entry(frame, width=8)
+        self.port_entry.insert(0, str(self.catalog.connector_port))
+        self.port_entry.grid(row=2, column=3, sticky="w")
+
+        tk.Button(frame, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
+            row=2, column=4, sticky="w", padx=(10, 0)
+        )
+
+        tk.Label(frame, text="Status:").grid(row=3, column=0, sticky="w")
         self.status_label = tk.Label(frame, text="conectando...", fg="orange")
-        self.status_label.grid(row=2, column=1, sticky="w")
+        self.status_label.grid(row=3, column=1, sticky="w")
 
     def _build_device_list(self) -> None:
         frame = tk.LabelFrame(self, text="Dispositivos cadastrados")
@@ -108,6 +123,14 @@ class ControllerWindow(tk.Tk):
         else:
             self.status_label.configure(text="desconectado — tentando reconectar", fg="red")
         self.after(3000, self._poll_status)
+
+    def _copy_to_clipboard(self, value: str) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(value)
+
+    @staticmethod
+    def _toggle_secret(entry: tk.Entry) -> None:
+        entry.configure(show="" if entry.cget("show") == "*" else "*")
 
     def _save_and_reconnect(self) -> None:
         host = self.host_entry.get().strip()
