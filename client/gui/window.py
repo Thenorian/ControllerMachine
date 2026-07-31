@@ -6,6 +6,7 @@ rodar direto (Linux, sem tray — ver main.py).
 from __future__ import annotations
 
 import logging
+import queue
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
@@ -97,17 +98,32 @@ class ControllerWindow(tk.Tk):
         self.log_text = scrolledtext.ScrolledText(self, height=8)
         self.log_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
+        # Logs chegam de threads em segundo plano (ex.: ControllerTransport,
+        # que roda numa thread própria) — nunca é seguro mexer em widget Tk
+        # fora da thread principal, então o handler só enfileira (thread-safe)
+        # e quem realmente insere no widget é o polling abaixo, na main loop.
+        self._log_queue: "queue.Queue[str]" = queue.Queue()
+
         class GuiLogHandler(logging.Handler):
-            def __init__(self, widget):
+            def __init__(self, log_queue):
                 super().__init__()
-                self.widget = widget
+                self.log_queue = log_queue
 
             def emit(self, record):
-                msg = self.format(record)
-                self.widget.insert(tk.END, msg + "\n")
-                self.widget.see(tk.END)
+                self.log_queue.put(self.format(record))
 
-        logging.getLogger().addHandler(GuiLogHandler(self.log_text))
+        logging.getLogger().addHandler(GuiLogHandler(self._log_queue))
+        self._poll_log_queue()
+
+    def _poll_log_queue(self) -> None:
+        while True:
+            try:
+                msg = self._log_queue.get_nowait()
+            except queue.Empty:
+                break
+            self.log_text.insert(tk.END, msg + "\n")
+            self.log_text.see(tk.END)
+        self.after(200, self._poll_log_queue)
 
     # ------------------------------------------------------------------ #
 
