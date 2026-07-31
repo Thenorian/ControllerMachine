@@ -36,14 +36,28 @@ class ControllerWindow(tk.Tk):
         frame.pack(fill="x", padx=10, pady=10)
 
         tk.Label(frame, text="Controller ID:").grid(row=0, column=0, sticky="w")
-        tk.Entry(frame, width=40).grid(row=0, column=1, sticky="w")
+        tk.Entry(frame, width=40).grid(row=0, column=1, sticky="w", columnspan=3)
         entry = frame.grid_slaves(row=0, column=1)[0]
         entry.insert(0, self.catalog.controller_id)
         entry.configure(state="readonly")
 
-        tk.Label(frame, text="Status:").grid(row=1, column=0, sticky="w")
+        tk.Label(frame, text="Servidor:").grid(row=1, column=0, sticky="w")
+        self.host_entry = tk.Entry(frame, width=24)
+        self.host_entry.insert(0, self.catalog.connector_host)
+        self.host_entry.grid(row=1, column=1, sticky="w")
+
+        tk.Label(frame, text="Porta:").grid(row=1, column=2, sticky="w")
+        self.port_entry = tk.Entry(frame, width=8)
+        self.port_entry.insert(0, str(self.catalog.connector_port))
+        self.port_entry.grid(row=1, column=3, sticky="w")
+
+        tk.Button(frame, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
+            row=1, column=4, sticky="w", padx=(10, 0)
+        )
+
+        tk.Label(frame, text="Status:").grid(row=2, column=0, sticky="w")
         self.status_label = tk.Label(frame, text="conectando...", fg="orange")
-        self.status_label.grid(row=1, column=1, sticky="w")
+        self.status_label.grid(row=2, column=1, sticky="w")
 
     def _build_device_list(self) -> None:
         frame = tk.LabelFrame(self, text="Dispositivos cadastrados")
@@ -94,6 +108,21 @@ class ControllerWindow(tk.Tk):
         else:
             self.status_label.configure(text="desconectado — tentando reconectar", fg="red")
         self.after(3000, self._poll_status)
+
+    def _save_and_reconnect(self) -> None:
+        host = self.host_entry.get().strip()
+        try:
+            port = int(self.port_entry.get())
+        except ValueError:
+            messagebox.showwarning("Porta inválida", "A porta precisa ser um número.")
+            return
+        if not host:
+            messagebox.showwarning("Servidor obrigatório", "Preencha o endereço do servidor.")
+            return
+
+        self.catalog.set_connector(host, port)
+        self.transport.point_to(host, port)
+        self.status_label.configure(text="reconectando...", fg="orange")
 
     # ------------------------------------------------------------------ #
 

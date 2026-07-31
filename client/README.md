@@ -15,6 +15,14 @@ Linux: `python main.py --install-service` registra como serviço systemd
 (precisa de `sudo`). `python main.py --uninstall-service` remove.
 Windows: `python main.py --install-autostart` cria atalho na pasta Startup.
 
+## Apontar para outro servidor
+
+Na janela (Windows), campo "Servidor" + "Porta" no topo, botão "Salvar e
+reconectar" — grava em `config.json` (`catalog.set_connector`) e força
+reconexão imediata sem esperar o backoff de retry (`transport.point_to`).
+No Linux (sem GUI), editar `connector_host`/`connector_port` direto no
+`config.json` e reiniciar o serviço (`systemctl restart controller-machine`).
+
 ## `config.json`
 
 Windows: `%APPDATA%\ControllerMachine\config.json`.

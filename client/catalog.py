@@ -41,6 +41,23 @@ class DeviceCatalog:
     def company_name(self) -> str:
         return self._config.get("company_name", "")
 
+    @property
+    def connector_host(self) -> str:
+        return self._config["connector_host"]
+
+    @property
+    def connector_port(self) -> int:
+        return self._config["connector_port"]
+
+    def set_connector(self, host: str, port: int) -> None:
+        """Aponta o Controller Machine pra outro servidor (endereço do
+        connector embutido no Simple ERP). Quem chama isso ainda precisa
+        avisar o transport pra reconectar de fato — ver
+        ControllerTransport.point_to / força reconexão."""
+        self._config["connector_host"] = host
+        self._config["connector_port"] = port
+        self._save()
+
     def list_devices(self) -> list[dict]:
         return list(self._config["devices"])
 
