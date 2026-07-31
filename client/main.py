@@ -136,18 +136,13 @@ def run_windows(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
 def main() -> None:
     catalog = DeviceCatalog()
     transport = ControllerTransport(
-        host="127.0.0.1",  # editar no config.json — ver connector_host
-        port=7689,
+        host=catalog.connector_host,
+        port=catalog.connector_port,
         controller_id=catalog.controller_id,
         secret=catalog.secret,
         announce_payload=catalog.to_announce_payload,
         on_job=lambda job: handle_job(catalog, job),
     )
-
-    from config import load_config
-    raw_config = load_config()
-    transport.host = raw_config["connector_host"]
-    transport.port = raw_config["connector_port"]
 
     system = platform.system()
     if system == "Windows":

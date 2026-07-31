@@ -40,6 +40,7 @@ class ControllerTransport:
         self._thread: threading.Thread | None = None
         self._retry_delay = 5
         self._max_retry_delay = 60
+        self._wake_event = threading.Event()
 
     def start(self) -> None:
         if self.running:
@@ -56,6 +57,22 @@ class ControllerTransport:
                 self._conn.close()
             except OSError:
                 pass
+
+    def point_to(self, host: str, port: int) -> None:
+        """Aponta pra outro servidor e força reconexão imediata (não espera
+        o backoff de retry) — usado quando o usuário troca host/porta na
+        janela e clica em salvar."""
+        self.host = host
+        self.port = port
+        self._force_reconnect()
+
+    def _force_reconnect(self) -> None:
+        if self._conn:
+            try:
+                self._conn.close()
+            except OSError:
+                pass
+        self._wake_event.set()
 
     def notify_catalog_changed(self) -> None:
         """Chamar depois de adicionar/remover/renomear um dispositivo
@@ -112,8 +129,12 @@ class ControllerTransport:
             if not self.running:
                 break
             logger.info(f"Reconectando em {delay}s...")
-            time.sleep(delay)
-            delay = min(delay * 2, self._max_retry_delay)
+            woke_early = self._wake_event.wait(delay)
+            if woke_early:
+                self._wake_event.clear()
+                delay = self._retry_delay  # troca de servidor não deve herdar backoff acumulado
+            else:
+                delay = min(delay * 2, self._max_retry_delay)
 
     def _dispatch(self, msg: dict) -> None:
         if msg.get("type") != "job":
