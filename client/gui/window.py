@@ -1,18 +1,42 @@
 """
-Janela de administração do Controller Machine — cadastro de dispositivos,
-status da conexão e log. Abre a partir do ícone da bandeja (Windows) ou pode
-rodar direto (Linux, sem tray — ver main.py).
+Janela de administração do Controller Machine — identidade/servidor,
+cadastro de dispositivos e log, organizados em abas (estilo "Propriedades"
+do Windows / OpenVPN GUI: simples, sem frescura). Abre a partir do ícone da
+bandeja (Windows) ou pode rodar direto (Linux, sem tray — ver main.py).
 """
 from __future__ import annotations
 
 import logging
 import queue
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from catalog import DeviceCatalog
+from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
 from transport import ControllerTransport
+
+TYPE_LABELS = {
+    "printer_common": "Impressora",
+    "printer_fiscal": "Impressora fiscal (DANFE)",
+    "scale": "Balança",
+}
+TYPE_BY_LABEL = {v: k for k, v in TYPE_LABELS.items()}
+
+CONNECTION_KINDS = {
+    "printer_common": ["os_printer", "tcp"],
+    "printer_fiscal": ["os_printer", "tcp", "pdf_folder"],
+    "scale": ["tcp", "file", "serial"],
+}
+KIND_LABELS = {
+    "os_printer": "Impressora instalada no SO",
+    "tcp": "Rede (IP/porta)",
+    "file": "Arquivo/pasta",
+    "pdf_folder": "Salvar PDF numa pasta",
+    "serial": "Porta serial",
+}
+
+BAUD_RATES = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"]
 
 
 class ControllerWindow(tk.Tk):
@@ -20,90 +44,117 @@ class ControllerWindow(tk.Tk):
         super().__init__()
         self.catalog = catalog
         self.transport = transport
-
         self.title("Controller Machine")
 
-        self._build_status_frame()
-        self._build_device_list()
-        self._build_log_area()
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill="both", expand=True, padx=6, pady=6)
+
+        general_tab = ttk.Frame(notebook)
+        devices_tab = ttk.Frame(notebook)
+        log_tab = ttk.Frame(notebook)
+        notebook.add(general_tab, text="Geral")
+        notebook.add(devices_tab, text="Dispositivos")
+        notebook.add(log_tab, text="Log")
+
+        self._build_general_tab(general_tab)
+        self._build_devices_tab(devices_tab)
+        self._build_log_tab(log_tab)
         self._refresh_devices()
         self._poll_status()
 
         # Deixa o Tk calcular o tamanho real que o conteúdo pede (em vez de
-        # forçar um geometry() fixo, que cortava botões/campos assim que a
-        # gente adicionava mais coisa na tela — aí só aparecia tudo depois
-        # de maximizar na mão). minsize trava esse tamanho como o menor
-        # permitido; a janela continua livre pra crescer se o usuário quiser.
+        # forçar um geometry() fixo, que corta botões/campos assim que a
+        # gente adiciona mais coisa na tela). minsize trava esse tamanho como
+        # o menor permitido; a janela continua livre pra crescer se quiser.
         self.update_idletasks()
         self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
 
     # ------------------------------------------------------------------ #
+    # Aba Geral
+    # ------------------------------------------------------------------ #
 
-    def _build_status_frame(self) -> None:
-        frame = tk.Frame(self)
-        frame.pack(fill="x", padx=10, pady=10)
+    def _build_general_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=10)
 
-        tk.Label(frame, text="Controller ID:").grid(row=0, column=0, sticky="w")
-        id_entry = tk.Entry(frame, width=40)
-        id_entry.grid(row=0, column=1, sticky="w", columnspan=3)
+        identity = ttk.LabelFrame(parent, text="Identidade", padding=8)
+        identity.pack(fill="x")
+
+        ttk.Label(identity, text="Controller ID:").grid(row=0, column=0, sticky="w", pady=2)
+        id_entry = ttk.Entry(identity, width=38)
         id_entry.insert(0, self.catalog.controller_id)
         id_entry.configure(state="readonly")
-        tk.Button(frame, text="Copiar", command=lambda: self._copy_to_clipboard(self.catalog.controller_id)).grid(
+        id_entry.grid(row=0, column=1, sticky="w", pady=2)
+        ttk.Button(identity, text="Copiar", width=8,
+                   command=lambda: self._copy_to_clipboard(self.catalog.controller_id)).grid(
+            row=0, column=2, padx=(6, 0)
+        )
+
+        ttk.Label(identity, text="Secret:").grid(row=1, column=0, sticky="w", pady=2)
+        secret_entry = ttk.Entry(identity, width=38, show="*")
+        secret_entry.insert(0, self.catalog.secret)
+        secret_entry.configure(state="readonly")
+        secret_entry.grid(row=1, column=1, sticky="w", pady=2)
+        secret_buttons = ttk.Frame(identity)
+        secret_buttons.grid(row=1, column=2, sticky="w", padx=(6, 0))
+        ttk.Button(secret_buttons, text="Copiar", width=8,
+                   command=lambda: self._copy_to_clipboard(self.catalog.secret)).pack(side="left")
+        ttk.Button(secret_buttons, text="Mostrar", width=8,
+                   command=lambda: self._toggle_secret(secret_entry)).pack(side="left", padx=(4, 0))
+
+        server = ttk.LabelFrame(parent, text="Servidor", padding=8)
+        server.pack(fill="x", pady=(8, 0))
+
+        ttk.Label(server, text="Endereço:").grid(row=0, column=0, sticky="w", pady=2)
+        self.host_entry = ttk.Entry(server, width=24)
+        self.host_entry.insert(0, self.catalog.connector_host)
+        self.host_entry.grid(row=0, column=1, sticky="w", pady=2)
+
+        ttk.Label(server, text="Porta:").grid(row=0, column=2, sticky="w", padx=(10, 0), pady=2)
+        self.port_entry = ttk.Entry(server, width=8)
+        self.port_entry.insert(0, str(self.catalog.connector_port))
+        self.port_entry.grid(row=0, column=3, sticky="w", pady=2)
+
+        ttk.Button(server, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
             row=0, column=4, sticky="w", padx=(10, 0)
         )
 
-        tk.Label(frame, text="Secret:").grid(row=1, column=0, sticky="w")
-        secret_entry = tk.Entry(frame, width=40, show="*")
-        secret_entry.grid(row=1, column=1, sticky="w", columnspan=3)
-        secret_entry.insert(0, self.catalog.secret)
-        secret_entry.configure(state="readonly")
-        tk.Button(frame, text="Copiar", command=lambda: self._copy_to_clipboard(self.catalog.secret)).grid(
-            row=1, column=4, sticky="w", padx=(10, 0)
-        )
-        tk.Button(frame, text="Mostrar", command=lambda: self._toggle_secret(secret_entry)).grid(
-            row=1, column=5, sticky="w", padx=(5, 0)
-        )
+        ttk.Label(server, text="Status:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.status_label = ttk.Label(server, text="conectando...", foreground="#b8860b")
+        self.status_label.grid(row=1, column=1, columnspan=3, sticky="w", pady=(6, 0))
 
-        tk.Label(frame, text="Servidor:").grid(row=2, column=0, sticky="w")
-        self.host_entry = tk.Entry(frame, width=24)
-        self.host_entry.insert(0, self.catalog.connector_host)
-        self.host_entry.grid(row=2, column=1, sticky="w")
+    # ------------------------------------------------------------------ #
+    # Aba Dispositivos
+    # ------------------------------------------------------------------ #
 
-        tk.Label(frame, text="Porta:").grid(row=2, column=2, sticky="w")
-        self.port_entry = tk.Entry(frame, width=8)
-        self.port_entry.insert(0, str(self.catalog.connector_port))
-        self.port_entry.grid(row=2, column=3, sticky="w")
+    def _build_devices_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=10)
 
-        tk.Button(frame, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
-            row=2, column=4, sticky="w", padx=(10, 0)
-        )
+        columns = ("label", "type", "brand", "connection")
+        self.tree = ttk.Treeview(parent, columns=columns, show="headings", height=10)
+        headings = {"label": "Nome", "type": "Tipo", "brand": "Marca", "connection": "Conexão"}
+        widths = {"label": 150, "type": 150, "brand": 110, "connection": 190}
+        for col in columns:
+            self.tree.heading(col, text=headings[col])
+            self.tree.column(col, width=widths[col])
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<Double-1>", lambda _e: self._edit_selected())
 
-        tk.Label(frame, text="Status:").grid(row=3, column=0, sticky="w")
-        self.status_label = tk.Label(frame, text="conectando...", fg="orange")
-        self.status_label.grid(row=3, column=1, sticky="w")
+        buttons = ttk.Frame(parent)
+        buttons.pack(side="right", fill="y", padx=(8, 0))
+        ttk.Button(buttons, text="Adicionar", command=self._add_device).pack(fill="x", pady=2)
+        ttk.Button(buttons, text="Editar", command=self._edit_selected).pack(fill="x", pady=2)
+        ttk.Button(buttons, text="Remover", command=self._remove_selected).pack(fill="x", pady=2)
 
-    def _build_device_list(self) -> None:
-        frame = tk.LabelFrame(self, text="Dispositivos cadastrados")
-        frame.pack(fill="both", expand=True, padx=10, pady=5)
+    # ------------------------------------------------------------------ #
+    # Aba Log
+    # ------------------------------------------------------------------ #
 
-        columns = ("label", "type", "brand")
-        self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=8)
-        for col, title in zip(columns, ("Label", "Tipo", "Marca")):
-            self.tree.heading(col, text=title)
-        self.tree.pack(fill="both", expand=True, side="left", padx=5, pady=5)
-
-        buttons = tk.Frame(frame)
-        buttons.pack(side="right", fill="y", padx=5)
-        tk.Button(buttons, text="Adicionar impressora do SO", command=self._add_os_printer).pack(fill="x", pady=2)
-        tk.Button(buttons, text="Adicionar dispositivo de rede", command=self._add_network_device).pack(fill="x", pady=2)
-        tk.Button(buttons, text="Renomear", command=self._rename_selected).pack(fill="x", pady=2)
-        tk.Button(buttons, text="Remover", command=self._remove_selected).pack(fill="x", pady=2)
-
-    def _build_log_area(self) -> None:
+    def _build_log_tab(self, parent: ttk.Frame) -> None:
         from tkinter import scrolledtext
 
-        self.log_text = scrolledtext.ScrolledText(self, height=8)
-        self.log_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        parent.configure(padding=10)
+        self.log_text = scrolledtext.ScrolledText(parent, height=14)
+        self.log_text.pack(fill="both", expand=True)
 
         # Logs chegam de threads em segundo plano (ex.: ControllerTransport,
         # que roda numa thread própria) — nunca é seguro mexer em widget Tk
@@ -137,17 +188,21 @@ class ControllerWindow(tk.Tk):
     def _refresh_devices(self) -> None:
         self.tree.delete(*self.tree.get_children())
         for device in self.catalog.list_devices():
-            self.tree.insert("", "end", iid=device["device_id"],
-                              values=(device["label"], device["type"], device["brand"]))
+            self.tree.insert("", "end", iid=device["device_id"], values=(
+                device["label"],
+                TYPE_LABELS.get(device["type"], device["type"]),
+                device["brand"],
+                _describe_connection(device["connection"]),
+            ))
 
     def _poll_status(self) -> None:
         if self.transport.connected:
-            self.status_label.configure(text="conectado", fg="green")
+            self.status_label.configure(text="conectado", foreground="#1a7f37")
         elif self.transport.server_reachable:
             motivo = self.transport.last_error or "aguardando registro"
-            self.status_label.configure(text=f"servidor encontrado — {motivo}", fg="orange")
+            self.status_label.configure(text=f"servidor encontrado — {motivo}", foreground="#b8860b")
         else:
-            self.status_label.configure(text="servidor não encontrado — tentando reconectar", fg="red")
+            self.status_label.configure(text="servidor não encontrado — tentando reconectar", foreground="#c0392b")
         self.after(3000, self._poll_status)
 
     def _copy_to_clipboard(self, value: str) -> None:
@@ -171,44 +226,26 @@ class ControllerWindow(tk.Tk):
 
         self.catalog.set_connector(host, port)
         self.transport.point_to(host, port)
-        self.status_label.configure(text="reconectando...", fg="orange")
+        self.status_label.configure(text="reconectando...", foreground="#b8860b")
 
     # ------------------------------------------------------------------ #
 
-    def _add_os_printer(self) -> None:
-        printers = discover_os_printers()
-        if not printers:
-            messagebox.showinfo("Nenhuma impressora encontrada",
-                                 "Não achei nenhuma impressora instalada no sistema.")
-            return
-
-        chosen = _choose_from_list(self, "Impressoras instaladas", printers)
-        if not chosen:
-            return
-        label = simpledialog.askstring("Label", "Nome de exibição:", initialvalue=chosen)
-        if not label:
-            return
-
-        self.catalog.add_device(
-            label=label, type_="printer_common", brand="generic",
-            connection={"kind": "os_printer", "os_name": chosen},
-        )
-        self._after_catalog_change()
-
-    def _add_network_device(self) -> None:
-        dialog = NetworkDeviceDialog(self)
+    def _add_device(self) -> None:
+        dialog = DeviceDialog(self)
         self.wait_window(dialog)
         if dialog.result:
             self.catalog.add_device(**dialog.result)
             self._after_catalog_change()
 
-    def _rename_selected(self) -> None:
+    def _edit_selected(self) -> None:
         device_id = self._selected_device_id()
         if not device_id:
             return
-        new_label = simpledialog.askstring("Renomear", "Novo nome:")
-        if new_label:
-            self.catalog.rename_device(device_id, new_label)
+        device = self.catalog.get_device(device_id)
+        dialog = DeviceDialog(self, device=device)
+        self.wait_window(dialog)
+        if dialog.result:
+            self.catalog.update_device(device_id, **dialog.result)
             self._after_catalog_change()
 
     def _remove_selected(self) -> None:
@@ -228,27 +265,17 @@ class ControllerWindow(tk.Tk):
         self.transport.notify_catalog_changed()
 
 
-def _choose_from_list(parent, title: str, options: list[str]) -> str | None:
-    top = tk.Toplevel(parent)
-    top.title(title)
-    top.transient(parent)  # amarra ao pai — some/volta junto, fica na frente dele
-    listbox = tk.Listbox(top, width=50, height=10)
-    for option in options:
-        listbox.insert(tk.END, option)
-    listbox.pack(padx=10, pady=10)
-
-    result = {"value": None}
-
-    def confirm():
-        selection = listbox.curselection()
-        if selection:
-            result["value"] = listbox.get(selection[0])
-        top.destroy()
-
-    tk.Button(top, text="Selecionar", command=confirm).pack(pady=(0, 10))
-    _make_dialog_visible(top)
-    parent.wait_window(top)
-    return result["value"]
+def _describe_connection(connection: dict) -> str:
+    kind = connection.get("kind")
+    if kind == "os_printer":
+        return connection.get("os_name", "")
+    if kind == "tcp":
+        return f"{connection.get('host')}:{connection.get('port')}"
+    if kind in ("file", "pdf_folder"):
+        return connection.get("path", "")
+    if kind == "serial":
+        return f"{connection.get('serial_port')} @ {connection.get('baudrate', 9600)}"
+    return str(connection)
 
 
 def _make_dialog_visible(top: tk.Toplevel) -> None:
@@ -263,107 +290,273 @@ def _make_dialog_visible(top: tk.Toplevel) -> None:
     top.focus_force()
 
 
-class NetworkDeviceDialog(tk.Toplevel):
-    """Cadastro manual — usado pra balança e impressora de rede que não
-    aparecem na lista de impressoras instaladas no SO."""
+class DeviceDialog(tk.Toplevel):
+    """Cadastro e edição de dispositivo — o mesmo formulário serve pros dois
+    casos (`device=None` cadastra, `device={...}` edita esse device). Os
+    campos disponíveis mudam de acordo com o Tipo e a Conexão escolhidos."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, device: dict | None = None):
         super().__init__(parent)
-        self.title("Adicionar dispositivo de rede")
+        self.editing = device is not None
         self.result = None
+        self.title("Editar dispositivo" if self.editing else "Adicionar dispositivo")
+        self.resizable(False, False)
 
-        tk.Label(self, text="Label:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        self.label_entry = tk.Entry(self)
-        self.label_entry.grid(row=0, column=1, padx=5, pady=2)
+        body = ttk.Frame(self, padding=10)
+        body.pack(fill="both", expand=True)
 
-        tk.Label(self, text="Tipo:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        self.type_combo = ttk.Combobox(self, values=["printer_common", "printer_fiscal", "scale"], state="readonly")
-        self.type_combo.current(0)
-        self.type_combo.grid(row=1, column=1, padx=5, pady=2)
+        row = 0
+        ttk.Label(body, text="Nome:").grid(row=row, column=0, sticky="w", pady=2)
+        self.label_entry = ttk.Entry(body, width=32)
+        self.label_entry.grid(row=row, column=1, columnspan=2, sticky="w", pady=2)
+        row += 1
 
-        tk.Label(self, text="Marca:").grid(row=2, column=0, sticky="w", padx=5, pady=2)
-        self.brand_entry = tk.Entry(self)
-        self.brand_entry.insert(0, "generic")
-        self.brand_entry.grid(row=2, column=1, padx=5, pady=2)
+        ttk.Label(body, text="Tipo:").grid(row=row, column=0, sticky="w", pady=2)
+        self.type_combo = ttk.Combobox(body, values=list(TYPE_LABELS.values()), state="readonly", width=29)
+        self.type_combo.grid(row=row, column=1, columnspan=2, sticky="w", pady=2)
+        self.type_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_type_changed())
+        row += 1
 
-        tk.Label(self, text="Conexão:").grid(row=3, column=0, sticky="w", padx=5, pady=2)
-        self.kind_combo = ttk.Combobox(self, values=["tcp", "file"], state="readonly", width=17)
-        self.kind_combo.current(0)
-        self.kind_combo.grid(row=3, column=1, padx=5, pady=2)
-        self.kind_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_kind_fields())
+        ttk.Label(body, text="Marca:").grid(row=row, column=0, sticky="w", pady=2)
+        self.brand_combo = ttk.Combobox(body, width=29)
+        self.brand_combo.grid(row=row, column=1, columnspan=2, sticky="w", pady=2)
+        row += 1
 
-        # kind="tcp" — impressora/balança de rede (IP + porta)
-        self.tcp_frame = tk.Frame(self)
-        tk.Label(self.tcp_frame, text="IP:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        self.host_entry = tk.Entry(self.tcp_frame)
-        self.host_entry.grid(row=0, column=1, padx=5, pady=2)
-        tk.Label(self.tcp_frame, text="Porta:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        self.port_entry = tk.Entry(self.tcp_frame)
-        self.port_entry.insert(0, "9100")
-        self.port_entry.grid(row=1, column=1, padx=5, pady=2)
+        ttk.Label(body, text="Conexão:").grid(row=row, column=0, sticky="w", pady=2)
+        self.kind_combo = ttk.Combobox(body, state="readonly", width=29)
+        self.kind_combo.grid(row=row, column=1, columnspan=2, sticky="w", pady=2)
+        self.kind_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_kind_changed())
+        row += 1
 
-        # kind="file" — balança que lê a tabela de produtos de um arquivo
-        # (ex.: Toledo Prix/MGV5, Ramuza/Atena) — o caminho normalmente é
-        # uma pasta local ou compartilhamento de rede (\\ip\pasta\arquivo.txt)
-        # que o equipamento/software da balança fica observando.
-        self.file_frame = tk.Frame(self)
-        tk.Label(self.file_frame, text="Caminho do arquivo:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        self.path_entry = tk.Entry(self.file_frame, width=30)
-        self.path_entry.grid(row=0, column=1, padx=5, pady=2)
-        tk.Button(self.file_frame, text="...", width=3, command=self._browse_path).grid(row=0, column=2, padx=(2, 5))
+        self.kind_container = ttk.Frame(body)
+        self.kind_container.grid(row=row, column=0, columnspan=3, sticky="we", pady=(4, 0))
+        row += 1
 
-        self.tcp_frame.grid(row=4, column=0, columnspan=2, sticky="w")
-        self._update_kind_fields()
+        self.settings_frame = ttk.LabelFrame(body, text="Impressão", padding=6)
+        self.settings_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
+        ttk.Label(self.settings_frame, text="Modo:").grid(row=0, column=0, sticky="w")
+        self.mode_combo = ttk.Combobox(self.settings_frame, values=["escpos", "raw"], state="readonly", width=12)
+        self.mode_combo.grid(row=0, column=1, sticky="w", padx=(4, 16))
+        ttk.Label(self.settings_frame, text="Bobina:").grid(row=0, column=2, sticky="w")
+        self.paper_combo = ttk.Combobox(self.settings_frame, values=["40mm", "80mm"], state="readonly", width=8)
+        self.paper_combo.grid(row=0, column=3, sticky="w", padx=(4, 0))
+        row += 1
 
-        tk.Button(self, text="Adicionar", command=self._confirm).grid(row=5, column=0, columnspan=2, pady=10)
+        self._build_kind_frames()
 
+        buttons = ttk.Frame(body)
+        buttons.grid(row=row, column=0, columnspan=3, pady=(12, 0))
+        ttk.Button(buttons, text="Salvar" if self.editing else "Adicionar", command=self._confirm).pack(side="left")
+        ttk.Button(buttons, text="Cancelar", command=self.destroy).pack(side="left", padx=(6, 0))
+
+        self._load(device)
         self.transient(parent)
         _make_dialog_visible(self)
 
-    def _update_kind_fields(self) -> None:
-        if self.kind_combo.get() == "tcp":
-            self.file_frame.grid_forget()
-            self.tcp_frame.grid(row=4, column=0, columnspan=2, sticky="w")
-        else:
-            self.tcp_frame.grid_forget()
-            self.file_frame.grid(row=4, column=0, columnspan=2, sticky="w")
+    # ---- sub-formulários por kind de conexão ----
 
-    def _browse_path(self) -> None:
-        from tkinter import filedialog
-        path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação da balança")
+    def _build_kind_frames(self) -> None:
+        self.kind_frames: dict[str, ttk.Frame] = {}
+        self._visible_kind_frame: ttk.Frame | None = None
+
+        f = ttk.Frame(self.kind_container)
+        ttk.Label(f, text="Impressora:").grid(row=0, column=0, sticky="w")
+        self.os_printer_combo = ttk.Combobox(f, values=discover_os_printers(), width=30)
+        self.os_printer_combo.grid(row=0, column=1, sticky="w", padx=(4, 0))
+        self.kind_frames["os_printer"] = f
+
+        f = ttk.Frame(self.kind_container)
+        ttk.Label(f, text="IP:").grid(row=0, column=0, sticky="w")
+        self.tcp_host_entry = ttk.Entry(f, width=20)
+        self.tcp_host_entry.grid(row=0, column=1, sticky="w", padx=(4, 12))
+        ttk.Label(f, text="Porta:").grid(row=0, column=2, sticky="w")
+        self.tcp_port_entry = ttk.Entry(f, width=8)
+        self.tcp_port_entry.grid(row=0, column=3, sticky="w", padx=(4, 0))
+        self.kind_frames["tcp"] = f
+
+        f = ttk.Frame(self.kind_container)
+        ttk.Label(f, text="Arquivo:").grid(row=0, column=0, sticky="w")
+        self.path_entry = ttk.Entry(f, width=28)
+        self.path_entry.grid(row=0, column=1, sticky="w", padx=(4, 4))
+        ttk.Button(f, text="...", width=3, command=self._browse_file_path).grid(row=0, column=2)
+        self.kind_frames["file"] = f
+
+        f = ttk.Frame(self.kind_container)
+        ttk.Label(f, text="Pasta:").grid(row=0, column=0, sticky="w")
+        self.pdf_folder_entry = ttk.Entry(f, width=28)
+        self.pdf_folder_entry.grid(row=0, column=1, sticky="w", padx=(4, 4))
+        ttk.Button(f, text="...", width=3, command=self._browse_folder_path).grid(row=0, column=2)
+        self.kind_frames["pdf_folder"] = f
+
+        f = ttk.Frame(self.kind_container)
+        ttk.Label(f, text="Porta serial:").grid(row=0, column=0, sticky="w")
+        self.serial_port_entry = ttk.Entry(f, width=14)
+        self.serial_port_entry.grid(row=0, column=1, sticky="w", padx=(4, 12))
+        ttk.Label(f, text="Baud:").grid(row=0, column=2, sticky="w")
+        self.baud_combo = ttk.Combobox(f, values=BAUD_RATES, state="readonly", width=8)
+        self.baud_combo.grid(row=0, column=3, sticky="w", padx=(4, 0))
+        self.kind_frames["serial"] = f
+
+    def _show_kind_frame(self, kind: str) -> None:
+        if self._visible_kind_frame is not None:
+            self._visible_kind_frame.grid_forget()
+        frame = self.kind_frames[kind]
+        frame.grid(row=0, column=0, sticky="w")
+        self._visible_kind_frame = frame
+
+    def _current_type(self) -> str:
+        return TYPE_BY_LABEL[self.type_combo.get()]
+
+    def _on_type_changed(self, *, preserve_kind: str | None = None) -> None:
+        type_ = self._current_type()
+        kinds = CONNECTION_KINDS[type_]
+        self.kind_combo.configure(values=[KIND_LABELS[k] for k in kinds])
+        self._kind_by_label = {KIND_LABELS[k]: k for k in kinds}
+
+        if preserve_kind and preserve_kind in kinds:
+            self.kind_combo.set(KIND_LABELS[preserve_kind])
+        else:
+            self.kind_combo.current(0)
+        self._on_kind_changed()
+
+        if type_ == "scale":
+            self.brand_combo.configure(values=list_scale_brands())
+        else:
+            self.brand_combo.configure(values=["generic"])
+
+        if type_ in ("printer_common", "printer_fiscal"):
+            self.settings_frame.grid()
+        else:
+            self.settings_frame.grid_remove()
+
+    def _on_kind_changed(self) -> None:
+        kind = self._kind_by_label.get(self.kind_combo.get())
+        if kind:
+            self._show_kind_frame(kind)
+
+    def _browse_file_path(self) -> None:
+        path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação")
         if path:
             self.path_entry.delete(0, tk.END)
             self.path_entry.insert(0, path)
 
-    def _confirm(self) -> None:
-        label = self.label_entry.get().strip()
-        kind = self.kind_combo.get()
-        if not label:
-            messagebox.showwarning("Campos obrigatórios", "Preencha o Label.")
+    def _browse_folder_path(self) -> None:
+        path = filedialog.askdirectory(parent=self, title="Pasta de destino")
+        if path:
+            self.pdf_folder_entry.delete(0, tk.END)
+            self.pdf_folder_entry.insert(0, path)
+
+    # ---- carregar valores existentes (modo edição) ----
+
+    def _load(self, device: dict | None) -> None:
+        self.mode_combo.set("escpos")
+        self.paper_combo.set("80mm")
+        self.baud_combo.set("9600")
+
+        if device is None:
+            self.type_combo.current(0)
+            self._on_type_changed()
             return
 
-        if kind == "tcp":
-            host = self.host_entry.get().strip()
-            if not host:
-                messagebox.showwarning("Campos obrigatórios", "Preencha o IP.")
+        self.label_entry.insert(0, device["label"])
+        self.type_combo.set(TYPE_LABELS.get(device["type"], device["type"]))
+        connection = device["connection"]
+        self._on_type_changed(preserve_kind=connection.get("kind"))
+
+        self.brand_combo.set(device["brand"])
+
+        settings = device.get("settings") or {}
+        if settings.get("mode"):
+            self.mode_combo.set(settings["mode"])
+        if settings.get("paper_width_mm"):
+            self.paper_combo.set(f"{settings['paper_width_mm']}mm")
+
+        kind = connection.get("kind")
+        if kind == "os_printer":
+            self.os_printer_combo.set(connection.get("os_name", ""))
+        elif kind == "tcp":
+            self.tcp_host_entry.insert(0, connection.get("host", ""))
+            self.tcp_port_entry.insert(0, str(connection.get("port", "")))
+        elif kind == "file":
+            self.path_entry.insert(0, connection.get("path", ""))
+        elif kind == "pdf_folder":
+            self.pdf_folder_entry.insert(0, connection.get("path", ""))
+        elif kind == "serial":
+            self.serial_port_entry.insert(0, connection.get("serial_port", ""))
+            self.baud_combo.set(str(connection.get("baudrate", 9600)))
+
+    # ---- confirmar ----
+
+    def _confirm(self) -> None:
+        label = self.label_entry.get().strip()
+        if not label:
+            messagebox.showwarning("Campo obrigatório", "Preencha o nome do dispositivo.")
+            return
+
+        type_ = self._current_type()
+        kind = self._kind_by_label.get(self.kind_combo.get())
+
+        connection = self._read_connection(kind)
+        if connection is None:
+            return  # já mostrou o aviso
+
+        settings = {}
+        if type_ in ("printer_common", "printer_fiscal"):
+            settings["mode"] = self.mode_combo.get() or "escpos"
+            paper = self.paper_combo.get()
+            if not paper:
+                messagebox.showwarning("Campo obrigatório", "Selecione a largura da bobina.")
                 return
-            try:
-                port = int(self.port_entry.get())
-            except ValueError:
-                messagebox.showwarning("Porta inválida", "A porta precisa ser um número.")
-                return
-            connection = {"kind": "tcp", "host": host, "port": port}
-        else:
-            path = self.path_entry.get().strip()
-            if not path:
-                messagebox.showwarning("Campos obrigatórios", "Preencha o caminho do arquivo.")
-                return
-            connection = {"kind": "file", "path": path}
+            settings["paper_width_mm"] = int(paper.replace("mm", ""))
 
         self.result = {
             "label": label,
-            "type_": self.type_combo.get(),
-            "brand": self.brand_entry.get().strip() or "generic",
+            "type_": type_,
+            "brand": self.brand_combo.get().strip() or "generic",
             "connection": connection,
+            "settings": settings,
         }
         self.destroy()
+
+    def _read_connection(self, kind: str) -> dict | None:
+        if kind == "os_printer":
+            os_name = self.os_printer_combo.get().strip()
+            if not os_name:
+                messagebox.showwarning("Campo obrigatório", "Escolha a impressora instalada.")
+                return None
+            return {"kind": "os_printer", "os_name": os_name}
+
+        if kind == "tcp":
+            host = self.tcp_host_entry.get().strip()
+            if not host:
+                messagebox.showwarning("Campo obrigatório", "Preencha o IP.")
+                return None
+            try:
+                port = int(self.tcp_port_entry.get())
+            except ValueError:
+                messagebox.showwarning("Porta inválida", "A porta precisa ser um número.")
+                return None
+            return {"kind": "tcp", "host": host, "port": port}
+
+        if kind == "file":
+            path = self.path_entry.get().strip()
+            if not path:
+                messagebox.showwarning("Campo obrigatório", "Preencha o caminho do arquivo.")
+                return None
+            return {"kind": "file", "path": path}
+
+        if kind == "pdf_folder":
+            path = self.pdf_folder_entry.get().strip()
+            if not path:
+                messagebox.showwarning("Campo obrigatório", "Preencha a pasta de destino.")
+                return None
+            return {"kind": "pdf_folder", "path": path}
+
+        if kind == "serial":
+            serial_port = self.serial_port_entry.get().strip()
+            if not serial_port:
+                messagebox.showwarning("Campo obrigatório", "Preencha a porta serial.")
+                return None
+            return {"kind": "serial", "serial_port": serial_port, "baudrate": int(self.baud_combo.get() or 9600)}
+
+        raise ValueError(f"kind desconhecido: {kind!r}")

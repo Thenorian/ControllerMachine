@@ -70,8 +70,12 @@ def _dispatch_fiscal(device: dict, job: dict) -> None:
         # PDF — não tem o que renderizar aqui, só entregar.
         data = base64.b64decode(job["data"])
     else:
-        paper_width_mm = device.get("settings", {}).get("paper_width_mm", 80)
-        data = printer_fiscal.render_danfe_nfce(job["data"], paper_width_mm=paper_width_mm)
+        settings = device.get("settings", {})
+        data = printer_fiscal.render_danfe_nfce(
+            job["data"],
+            paper_width_mm=settings.get("paper_width_mm", 80),
+            mode=settings.get("mode", "escpos"),
+        )
 
     if connection["kind"] == "pdf_folder":
         if not is_pdf:

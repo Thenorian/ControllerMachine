@@ -54,3 +54,7 @@ def get_formatter(brand: str) -> ScaleFormatter:
         return _REGISTRY[brand]
     except KeyError:
         raise ValueError(f"marca de balança desconhecida: {brand!r} (disponíveis: {sorted(_REGISTRY)})")
+
+
+def list_brands() -> list[str]:
+    return sorted(_REGISTRY)

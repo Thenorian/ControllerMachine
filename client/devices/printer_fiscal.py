@@ -36,11 +36,12 @@ from __future__ import annotations
 from devices.escpos import EscPosBuilder, chars_per_line
 
 
-def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: int = 80) -> bytes:
+def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: int = 80,
+                       mode: str = "escpos") -> bytes:
     LINE_WIDTH = chars_per_line(paper_width_mm)
     VALUE_COL = 10  # cabe "-9999999.99" folgado, mesma coluna nos dois tamanhos de bobina
     LEFT_COL = LINE_WIDTH - VALUE_COL
-    b = EscPosBuilder(encoding=encoding)
+    b = EscPosBuilder(encoding=encoding, plain=(mode == "raw"))
 
     emitente = payload["emitente"]
     b.align("center").bold(True).line(emitente.get("razao_social", "")).bold(False)
