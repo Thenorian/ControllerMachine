@@ -62,12 +62,14 @@ class ControllerWindow(tk.Tk):
         self._refresh_devices()
         self._poll_status()
 
-        # Deixa o Tk calcular o tamanho real que o conteúdo pede (em vez de
-        # forçar um geometry() fixo, que corta botões/campos assim que a
-        # gente adiciona mais coisa na tela). minsize trava esse tamanho como
-        # o menor permitido; a janela continua livre pra crescer se quiser.
+        # Tamanho fixo, como janela de Propriedades do Windows (Propriedades
+        # de Usuário, de Pasta etc.) — não é redimensionável. Deixa o Tk
+        # calcular o tamanho real que o conteúdo pede (em vez de forçar um
+        # geometry() arbitrário, que corta botões/campos assim que a gente
+        # adiciona mais coisa na tela) e trava nesse tamanho.
         self.update_idletasks()
-        self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
+        self.geometry(f"{self.winfo_reqwidth()}x{self.winfo_reqheight()}")
+        self.resizable(False, False)
 
     # ------------------------------------------------------------------ #
     # Aba Geral
