@@ -31,8 +31,14 @@ ALIGN_CENTER = ESC + b"a" + b"\x01"
 ALIGN_RIGHT = ESC + b"a" + b"\x02"
 BOLD_ON = ESC + b"E" + b"\x01"
 BOLD_OFF = ESC + b"E" + b"\x00"
-CUT = GS + b"V" + b"\x00"
+CUT_FULL = GS + b"V" + b"\x00"
+CUT_PARTIAL = GS + b"V" + b"\x01"
 LINE_FEED = b"\n"
+
+# Encodings mais comuns em impressora térmica nacional — cp860 (padrão desse
+# módulo) é o de fato mais usado no Brasil, os outros existem porque alguns
+# equipamentos/firmwares mais novos ou importados esperam charset diferente.
+SUPPORTED_ENCODINGS = ("cp860", "cp850", "cp437", "cp1252", "utf-8")
 
 
 class EscPosBuilder:
@@ -73,8 +79,15 @@ class EscPosBuilder:
         self._buffer += LINE_FEED * lines
         return self
 
-    def cut(self) -> "EscPosBuilder":
-        self._buffer += CUT
+    def cut(self, mode: str = "full") -> "EscPosBuilder":
+        if mode == "full":
+            self._buffer += CUT_FULL
+        elif mode == "partial":
+            self._buffer += CUT_PARTIAL
+        elif mode == "none":
+            pass
+        else:
+            raise ValueError(f"modo de corte desconhecido: {mode!r} (use full/partial/none)")
         return self
 
     def build(self) -> bytes:

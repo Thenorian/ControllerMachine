@@ -44,6 +44,22 @@ MODE_LABELS = {
 }
 MODE_BY_LABEL = {v: k for k, v in MODE_LABELS.items()}
 
+ENCODING_LABELS = {
+    "cp860": "Português (CP860)",
+    "cp850": "Europeu Ocidental (CP850)",
+    "cp437": "EUA (CP437)",
+    "cp1252": "Windows (CP1252)",
+    "utf-8": "UTF-8",
+}
+ENCODING_BY_LABEL = {v: k for k, v in ENCODING_LABELS.items()}
+
+CUT_LABELS = {
+    "full": "Corte total",
+    "partial": "Corte parcial",
+    "none": "Sem corte",
+}
+CUT_BY_LABEL = {v: k for k, v in CUT_LABELS.items()}
+
 # Marcas de balança conhecidas (formatters registrados em devices/scale) —
 # nomes amigáveis pro combo; qualquer outro texto digitado é aceito também
 # (o combo não é readonly), já que pode surgir marca nova ainda não coberta.
@@ -386,13 +402,31 @@ class DeviceDialog(tk.Toplevel):
 
         self.settings_frame = ttk.LabelFrame(body, text="Impressão (cupom térmico)", padding=6)
         self.settings_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
+
         ttk.Label(self.settings_frame, text="Modo:").grid(row=0, column=0, sticky="w")
         self.mode_combo = ttk.Combobox(self.settings_frame, values=list(MODE_LABELS.values()),
-                                        state="readonly", width=24)
+                                        state="readonly", width=22)
         self.mode_combo.grid(row=0, column=1, sticky="w", padx=(4, 16))
         ttk.Label(self.settings_frame, text="Bobina:").grid(row=0, column=2, sticky="w")
         self.paper_combo = ttk.Combobox(self.settings_frame, values=["40mm", "80mm"], state="readonly", width=8)
         self.paper_combo.grid(row=0, column=3, sticky="w", padx=(4, 0))
+
+        ttk.Label(self.settings_frame, text="Caracteres:").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.encoding_combo = ttk.Combobox(self.settings_frame, values=list(ENCODING_LABELS.values()),
+                                            state="readonly", width=22)
+        self.encoding_combo.grid(row=1, column=1, sticky="w", padx=(4, 16), pady=(4, 0))
+        ttk.Label(self.settings_frame, text="Corte:").grid(row=1, column=2, sticky="w", pady=(4, 0))
+        self.cut_combo = ttk.Combobox(self.settings_frame, values=list(CUT_LABELS.values()),
+                                       state="readonly", width=8)
+        self.cut_combo.grid(row=1, column=3, sticky="w", padx=(4, 0), pady=(4, 0))
+
+        ttk.Label(self.settings_frame, text="Cabeçalho:").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.header_entry = ttk.Entry(self.settings_frame, width=40)
+        self.header_entry.grid(row=2, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
+
+        ttk.Label(self.settings_frame, text="Rodapé:").grid(row=3, column=0, sticky="w", pady=(4, 0))
+        self.footer_entry = ttk.Entry(self.settings_frame, width=40)
+        self.footer_entry.grid(row=3, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
         row += 1
 
         self._build_kind_frames()
@@ -489,7 +523,10 @@ class DeviceDialog(tk.Toplevel):
             self._show_kind_frame(kind)
 
         type_ = self._current_type()
-        show_settings = type_ in ("printer_common", "printer_fiscal") and kind in KINDS_WITH_PRINT_SETTINGS
+        # Só a fiscal (DANFE) é de fato renderizada pelo Controller Machine —
+        # impressora comum só repassa os bytes prontos que o Simple ERP manda,
+        # então modo/bobina/corte/cabeçalho não têm efeito nenhum pra ela.
+        show_settings = type_ == "printer_fiscal" and kind in KINDS_WITH_PRINT_SETTINGS
         if show_settings:
             self.settings_frame.grid()
         else:
@@ -517,6 +554,8 @@ class DeviceDialog(tk.Toplevel):
     def _load(self, device: dict | None) -> None:
         self.mode_combo.set(MODE_LABELS["escpos"])
         self.paper_combo.set("80mm")
+        self.encoding_combo.set(ENCODING_LABELS["cp860"])
+        self.cut_combo.set(CUT_LABELS["full"])
         self.baud_combo.set("9600")
 
         if device is None:
@@ -539,6 +578,12 @@ class DeviceDialog(tk.Toplevel):
             self.mode_combo.set(MODE_LABELS.get(settings["mode"], settings["mode"]))
         if settings.get("paper_width_mm"):
             self.paper_combo.set(f"{settings['paper_width_mm']}mm")
+        if settings.get("encoding"):
+            self.encoding_combo.set(ENCODING_LABELS.get(settings["encoding"], settings["encoding"]))
+        if settings.get("cut_mode"):
+            self.cut_combo.set(CUT_LABELS.get(settings["cut_mode"], settings["cut_mode"]))
+        self.header_entry.insert(0, settings.get("header_text", ""))
+        self.footer_entry.insert(0, settings.get("footer_text", ""))
 
         kind = connection.get("kind")
         if kind == "os_printer":
@@ -573,13 +618,19 @@ class DeviceDialog(tk.Toplevel):
             return  # já mostrou o aviso
 
         settings = {}
-        if type_ in ("printer_common", "printer_fiscal") and kind in KINDS_WITH_PRINT_SETTINGS:
+        if type_ == "printer_fiscal" and kind in KINDS_WITH_PRINT_SETTINGS:
             settings["mode"] = MODE_BY_LABEL.get(self.mode_combo.get(), "escpos")
             paper = self.paper_combo.get()
             if not paper:
                 messagebox.showwarning("Campo obrigatório", "Selecione a largura da bobina.")
                 return
             settings["paper_width_mm"] = int(paper.replace("mm", ""))
+            settings["encoding"] = ENCODING_BY_LABEL.get(self.encoding_combo.get(), "cp860")
+            settings["cut_mode"] = CUT_BY_LABEL.get(self.cut_combo.get(), "full")
+            if self.header_entry.get().strip():
+                settings["header_text"] = self.header_entry.get().strip()
+            if self.footer_entry.get().strip():
+                settings["footer_text"] = self.footer_entry.get().strip()
 
         brand = self.brand_combo.get().strip() or "generic"
         if type_ == "scale":
