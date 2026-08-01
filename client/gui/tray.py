@@ -47,7 +47,13 @@ def run_tray(window) -> None:
 
 def install_windows_autostart(entrypoint_path: str) -> None:
     """Cria um atalho na pasta Startup do usuário atual, pra abrir junto com
-    o Windows sem precisar de login manual toda vez."""
+    o Windows sem precisar de login manual toda vez.
+
+    `entrypoint_path` é `main.py` quando rodando via `python main.py` (modo
+    dev) — nesse caso o atalho aponta pro interpretador com esse script como
+    argumento. Já num .exe compilado (PyInstaller, `sys.frozen` é True),
+    `sys.executable` já É o programa inteiro — não faz sentido passar
+    argumento nenhum, o "entrypoint" é o próprio .exe."""
     import os
     import sys
 
@@ -55,6 +61,7 @@ def install_windows_autostart(entrypoint_path: str) -> None:
         os.environ["APPDATA"], "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
     )
     shortcut_path = os.path.join(startup_dir, "Controller Machine.lnk")
+    frozen = getattr(sys, "frozen", False)
 
     try:
         import pythoncom
@@ -62,10 +69,16 @@ def install_windows_autostart(entrypoint_path: str) -> None:
 
         shell = Dispatch("WScript.Shell")
         shortcut = shell.CreateShortCut(shortcut_path)
-        shortcut.TargetPath = sys.executable
-        shortcut.Arguments = f'"{entrypoint_path}"'
-        shortcut.WorkingDirectory = os.path.dirname(entrypoint_path)
-        shortcut.IconLocation = os.path.join(os.path.dirname(entrypoint_path), "assets", "icon.ico")
+        if frozen:
+            shortcut.TargetPath = sys.executable
+            shortcut.Arguments = ""
+            shortcut.WorkingDirectory = os.path.dirname(sys.executable)
+            shortcut.IconLocation = f"{sys.executable},0"
+        else:
+            shortcut.TargetPath = sys.executable
+            shortcut.Arguments = f'"{entrypoint_path}"'
+            shortcut.WorkingDirectory = os.path.dirname(entrypoint_path)
+            shortcut.IconLocation = os.path.join(os.path.dirname(entrypoint_path), "assets", "icon.ico")
         shortcut.save()
         logger.info(f"Atalho de inicialização automática criado em {shortcut_path}")
     except ImportError:
