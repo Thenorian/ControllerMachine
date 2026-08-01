@@ -36,8 +36,13 @@ LINE_FEED = b"\n"
 
 
 class EscPosBuilder:
-    def __init__(self, encoding: str = "cp860"):
+    def __init__(self, encoding: str = "cp860", plain: bool = False):
+        """plain=True: modo "raw" — não emite nenhum comando ESC/POS além do
+        init/corte (sem negrito, sem alinhamento). Existe pra equipamento
+        genérico/desconhecido que só entende texto puro e pode se confundir
+        com sequências de controle que ele não reconhece."""
         self.encoding = encoding
+        self.plain = plain
         self._buffer = bytearray(INIT)
 
     def text(self, value: str) -> "EscPosBuilder":
@@ -50,10 +55,14 @@ class EscPosBuilder:
         return self
 
     def align(self, where: str) -> "EscPosBuilder":
+        if self.plain:
+            return self
         self._buffer += {"left": ALIGN_LEFT, "center": ALIGN_CENTER, "right": ALIGN_RIGHT}[where]
         return self
 
     def bold(self, on: bool) -> "EscPosBuilder":
+        if self.plain:
+            return self
         self._buffer += BOLD_ON if on else BOLD_OFF
         return self
 

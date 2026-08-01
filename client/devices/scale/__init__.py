@@ -1,6 +1,6 @@
-from .base import get_formatter, register_formatter
+from .base import get_formatter, list_brands, register_formatter
 
-__all__ = ["get_formatter", "register_formatter"]
+__all__ = ["get_formatter", "list_brands", "register_formatter"]
 
 # Importar os módulos concretos registra os formatters (efeito colateral do
 # @register_formatter em cada arquivo).
