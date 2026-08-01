@@ -36,6 +36,8 @@ class ControllerTransport:
 
         self.running = False
         self.connected = False
+        self.server_reachable = False  # TCP conectou (mesmo que o registro seja recusado depois)
+        self.last_error: str | None = None  # motivo da última recusa de registro, se houver
         self._conn: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._retry_delay = 5
@@ -89,9 +91,11 @@ class ControllerTransport:
     def _connect_loop(self) -> None:
         delay = self._retry_delay
         while self.running:
+            self.server_reachable = False
             try:
                 self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self._conn.connect((self.host, self.port))
+                self.server_reachable = True  # TCP ok — mesmo que o registro falhe a seguir
 
                 self._send({
                     "type": "register",
@@ -102,8 +106,10 @@ class ControllerTransport:
 
                 buffer, msg = self._read_message(b"")
                 if not msg or msg.get("status") != "ok":
+                    self.last_error = (msg or {}).get("message") or "registro recusado"
                     raise ConnectionError(f"registro recusado: {msg}")
 
+                self.last_error = None
                 logger.info("Conectado e registrado no connector")
                 self.connected = True
                 delay = self._retry_delay  # reseta o backoff após sucesso

@@ -143,8 +143,11 @@ class ControllerWindow(tk.Tk):
     def _poll_status(self) -> None:
         if self.transport.connected:
             self.status_label.configure(text="conectado", fg="green")
+        elif self.transport.server_reachable:
+            motivo = self.transport.last_error or "aguardando registro"
+            self.status_label.configure(text=f"servidor encontrado — {motivo}", fg="orange")
         else:
-            self.status_label.configure(text="desconectado — tentando reconectar", fg="red")
+            self.status_label.configure(text="servidor não encontrado — tentando reconectar", fg="red")
         self.after(3000, self._poll_status)
 
     def _copy_to_clipboard(self, value: str) -> None:

@@ -7,6 +7,21 @@ precisar disso no futuro, é aqui que entra.
 """
 from __future__ import annotations
 
+# Colunas de texto por linha, Font A (fonte padrão) — varia com a largura
+# física da bobina. Números redondos usuais de mercado; se um equipamento
+# específico imprimir com fonte diferente, ajustar aqui.
+CHARS_PER_LINE = {40: 32, 80: 48}
+
+
+def chars_per_line(paper_width_mm: int) -> int:
+    try:
+        return CHARS_PER_LINE[paper_width_mm]
+    except KeyError:
+        raise ValueError(
+            f"largura de papel não suportada: {paper_width_mm}mm (use {sorted(CHARS_PER_LINE)})"
+        )
+
+
 ESC = b"\x1b"
 GS = b"\x1d"
 

@@ -69,9 +69,15 @@ class DeviceCatalog:
 
     # ------------------------------------------------------------------ #
 
-    def add_device(self, label: str, type_: str, brand: str, connection: dict[str, Any]) -> str:
+    def add_device(self, label: str, type_: str, brand: str, connection: dict[str, Any],
+                    settings: dict[str, Any] | None = None) -> str:
         """Cadastra um dispositivo novo e devolve o device_id recém-criado
-        (uuid4, mintado agora, nunca mais reaproveitado nem regenerado)."""
+        (uuid4, mintado agora, nunca mais reaproveitado nem regenerado).
+
+        `settings` é onde entra config específica de impressão (modo
+        escpos/raw, largura de papel) — ver devices/printer_common.py e
+        devices/escpos.py. Balança não usa settings, só connection+brand
+        (brand escolhe o formatter, ver devices/scale/base.py)."""
         if type_ not in VALID_TYPES:
             raise ValueError(f"type inválido: {type_!r} (esperado um de {VALID_TYPES})")
 
@@ -82,9 +88,28 @@ class DeviceCatalog:
             "type": type_,
             "brand": brand,
             "connection": connection,
+            "settings": settings or {},
         })
         self._save()
         return device_id
+
+    def update_device(self, device_id: str, label: str, type_: str, brand: str,
+                       connection: dict[str, Any], settings: dict[str, Any] | None = None) -> None:
+        """Edição completa — troca label/tipo/marca/conexão/settings do
+        device já cadastrado. device_id nunca muda (é a chave que amarra ao
+        periférico físico real, ver docstring do módulo)."""
+        if type_ not in VALID_TYPES:
+            raise ValueError(f"type inválido: {type_!r} (esperado um de {VALID_TYPES})")
+
+        device = self.get_device(device_id)
+        if device is None:
+            raise KeyError(device_id)
+        device["label"] = label
+        device["type"] = type_
+        device["brand"] = brand
+        device["connection"] = connection
+        device["settings"] = settings or {}
+        self._save()
 
     def rename_device(self, device_id: str, new_label: str) -> None:
         """Só o label é editável localmente — o device_id nunca muda. (O
