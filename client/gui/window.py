@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import queue
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from catalog import DeviceCatalog
@@ -45,6 +46,7 @@ class ControllerWindow(tk.Tk):
         self.catalog = catalog
         self.transport = transport
         self.title("Controller Machine")
+        self._set_icon()
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=6, pady=6)
@@ -71,58 +73,70 @@ class ControllerWindow(tk.Tk):
         self.geometry(f"{self.winfo_reqwidth()}x{self.winfo_reqheight()}")
         self.resizable(False, False)
 
+    def _set_icon(self) -> None:
+        ico_path = Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
+        if ico_path.exists():
+            try:
+                self.iconbitmap(default=str(ico_path))
+            except tk.TclError:
+                pass
+
     # ------------------------------------------------------------------ #
     # Aba Geral
     # ------------------------------------------------------------------ #
 
     def _build_general_tab(self, parent: ttk.Frame) -> None:
+        # Largura alvo próxima da de uma janela de Propriedades do Windows
+        # (bem mais estreita que a versão anterior) — vem naturalmente de
+        # encolher os campos (ID/secret não precisam mostrar o UUID inteiro
+        # de uma vez) e mover os botões de ação pra linha de baixo, não do
+        # lado — sem forçar width/propagate (isso cortava a altura).
         parent.configure(padding=10)
 
         identity = ttk.LabelFrame(parent, text="Identidade", padding=8)
         identity.pack(fill="x")
 
         ttk.Label(identity, text="Controller ID:").grid(row=0, column=0, sticky="w", pady=2)
-        id_entry = ttk.Entry(identity, width=38)
+        id_entry = ttk.Entry(identity, width=26)
         id_entry.insert(0, self.catalog.controller_id)
         id_entry.configure(state="readonly")
-        id_entry.grid(row=0, column=1, sticky="w", pady=2)
-        ttk.Button(identity, text="Copiar", width=8,
-                   command=lambda: self._copy_to_clipboard(self.catalog.controller_id)).grid(
-            row=0, column=2, padx=(6, 0)
-        )
+        id_entry.grid(row=1, column=0, sticky="we", pady=(0, 4))
 
-        ttk.Label(identity, text="Secret:").grid(row=1, column=0, sticky="w", pady=2)
-        secret_entry = ttk.Entry(identity, width=38, show="*")
+        ttk.Label(identity, text="Secret:").grid(row=2, column=0, sticky="w", pady=2)
+        secret_entry = ttk.Entry(identity, width=26, show="*")
         secret_entry.insert(0, self.catalog.secret)
         secret_entry.configure(state="readonly")
-        secret_entry.grid(row=1, column=1, sticky="w", pady=2)
-        secret_buttons = ttk.Frame(identity)
-        secret_buttons.grid(row=1, column=2, sticky="w", padx=(6, 0))
-        ttk.Button(secret_buttons, text="Copiar", width=8,
-                   command=lambda: self._copy_to_clipboard(self.catalog.secret)).pack(side="left")
-        ttk.Button(secret_buttons, text="Mostrar", width=8,
+        secret_entry.grid(row=3, column=0, sticky="we", pady=(0, 4))
+
+        id_secret_buttons = ttk.Frame(identity)
+        id_secret_buttons.grid(row=4, column=0, sticky="w", pady=(2, 0))
+        ttk.Button(id_secret_buttons, text="Copiar ID",
+                   command=lambda: self._copy_to_clipboard(self.catalog.controller_id)).pack(side="left")
+        ttk.Button(id_secret_buttons, text="Copiar secret",
+                   command=lambda: self._copy_to_clipboard(self.catalog.secret)).pack(side="left", padx=(4, 0))
+        ttk.Button(id_secret_buttons, text="Mostrar",
                    command=lambda: self._toggle_secret(secret_entry)).pack(side="left", padx=(4, 0))
 
         server = ttk.LabelFrame(parent, text="Servidor", padding=8)
         server.pack(fill="x", pady=(8, 0))
 
         ttk.Label(server, text="Endereço:").grid(row=0, column=0, sticky="w", pady=2)
-        self.host_entry = ttk.Entry(server, width=24)
+        self.host_entry = ttk.Entry(server, width=20)
         self.host_entry.insert(0, self.catalog.connector_host)
         self.host_entry.grid(row=0, column=1, sticky="w", pady=2)
 
-        ttk.Label(server, text="Porta:").grid(row=0, column=2, sticky="w", padx=(10, 0), pady=2)
+        ttk.Label(server, text="Porta:").grid(row=1, column=0, sticky="w", pady=2)
         self.port_entry = ttk.Entry(server, width=8)
         self.port_entry.insert(0, str(self.catalog.connector_port))
-        self.port_entry.grid(row=0, column=3, sticky="w", pady=2)
+        self.port_entry.grid(row=1, column=1, sticky="w", pady=2)
 
         ttk.Button(server, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
-            row=0, column=4, sticky="w", padx=(10, 0)
+            row=2, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
-        ttk.Label(server, text="Status:").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        self.status_label = ttk.Label(server, text="conectando...", foreground="#b8860b")
-        self.status_label.grid(row=1, column=1, columnspan=3, sticky="w", pady=(6, 0))
+        ttk.Label(server, text="Status:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        self.status_label = ttk.Label(server, text="conectando...", foreground="#b8860b", wraplength=280)
+        self.status_label.grid(row=4, column=0, columnspan=2, sticky="w")
 
     # ------------------------------------------------------------------ #
     # Aba Dispositivos
@@ -131,10 +145,12 @@ class ControllerWindow(tk.Tk):
     def _build_devices_tab(self, parent: ttk.Frame) -> None:
         parent.configure(padding=10)
 
-        columns = ("label", "type", "brand", "connection")
+        # Detalhe de conexão não entra na tabela (empurraria a largura da
+        # janela) — quem quiser ver IP/caminho/etc. abre Editar.
+        columns = ("label", "type", "brand")
         self.tree = ttk.Treeview(parent, columns=columns, show="headings", height=10)
-        headings = {"label": "Nome", "type": "Tipo", "brand": "Marca", "connection": "Conexão"}
-        widths = {"label": 150, "type": 150, "brand": 110, "connection": 190}
+        headings = {"label": "Nome", "type": "Tipo", "brand": "Marca"}
+        widths = {"label": 95, "type": 95, "brand": 70}
         for col in columns:
             self.tree.heading(col, text=headings[col])
             self.tree.column(col, width=widths[col])
@@ -142,10 +158,10 @@ class ControllerWindow(tk.Tk):
         self.tree.bind("<Double-1>", lambda _e: self._edit_selected())
 
         buttons = ttk.Frame(parent)
-        buttons.pack(side="right", fill="y", padx=(8, 0))
-        ttk.Button(buttons, text="Adicionar", command=self._add_device).pack(fill="x", pady=2)
-        ttk.Button(buttons, text="Editar", command=self._edit_selected).pack(fill="x", pady=2)
-        ttk.Button(buttons, text="Remover", command=self._remove_selected).pack(fill="x", pady=2)
+        buttons.pack(side="right", fill="y", padx=(6, 0))
+        ttk.Button(buttons, text="Adicionar", width=10, command=self._add_device).pack(fill="x", pady=2)
+        ttk.Button(buttons, text="Editar", width=10, command=self._edit_selected).pack(fill="x", pady=2)
+        ttk.Button(buttons, text="Remover", width=10, command=self._remove_selected).pack(fill="x", pady=2)
 
     # ------------------------------------------------------------------ #
     # Aba Log
@@ -194,7 +210,6 @@ class ControllerWindow(tk.Tk):
                 device["label"],
                 TYPE_LABELS.get(device["type"], device["type"]),
                 device["brand"],
-                _describe_connection(device["connection"]),
             ))
 
     def _poll_status(self) -> None:
@@ -265,19 +280,6 @@ class ControllerWindow(tk.Tk):
     def _after_catalog_change(self) -> None:
         self._refresh_devices()
         self.transport.notify_catalog_changed()
-
-
-def _describe_connection(connection: dict) -> str:
-    kind = connection.get("kind")
-    if kind == "os_printer":
-        return connection.get("os_name", "")
-    if kind == "tcp":
-        return f"{connection.get('host')}:{connection.get('port')}"
-    if kind in ("file", "pdf_folder"):
-        return connection.get("path", "")
-    if kind == "serial":
-        return f"{connection.get('serial_port')} @ {connection.get('baudrate', 9600)}"
-    return str(connection)
 
 
 def _make_dialog_visible(top: tk.Toplevel) -> None:
