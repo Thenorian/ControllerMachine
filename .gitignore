@@ -2,3 +2,7 @@ __pycache__/
 data.db
 client/config.json
 server/example_controllers.db
+
+# Lixo intermediário do PyInstaller (client/dist/*.exe é o resultado final,
+# esse sim entra no repo — build/ é só cache de build, não precisa versionar)
+client/build/
