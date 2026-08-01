@@ -15,6 +15,7 @@ from tkinter import filedialog, messagebox, ttk
 from catalog import DeviceCatalog
 from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
+from gui.folder_prompt import FolderPromptService
 from transport import ControllerTransport
 
 TYPE_LABELS = {
@@ -37,7 +38,36 @@ KIND_LABELS = {
     "serial": "Porta serial",
 }
 
+MODE_LABELS = {
+    "escpos": "ESC/POS (impressora térmica)",
+    "raw": "Texto simples (RAW)",
+}
+MODE_BY_LABEL = {v: k for k, v in MODE_LABELS.items()}
+
+# Marcas de balança conhecidas (formatters registrados em devices/scale) —
+# nomes amigáveis pro combo; qualquer outro texto digitado é aceito também
+# (o combo não é readonly), já que pode surgir marca nova ainda não coberta.
+SCALE_BRAND_LABELS = {
+    "toledo_mgv5_utf8": "Toledo Prix / MGV5 (UTF-8)",
+    "toledo_mgv5_ibm860": "Toledo Prix / MGV5 (IBM860)",
+    "ramuza_atena": "Ramuza Atena",
+    "filizola": "Filizola",
+}
+SCALE_BRAND_BY_LABEL = {v: k for k, v in SCALE_BRAND_LABELS.items()}
+
+# Só impressora de cupom (térmica, ESC/POS) precisa de modo/bobina — "salvar
+# como PDF numa pasta" não imprime fisicamente, não faz sentido nenhum dos
+# dois pra esse tipo de conexão.
+KINDS_WITH_PRINT_SETTINGS = {"os_printer", "tcp"}
+
 BAUD_RATES = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"]
+
+
+def _png_bytes(pil_image) -> bytes:
+    import io
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 class ControllerWindow(tk.Tk):
@@ -47,6 +77,7 @@ class ControllerWindow(tk.Tk):
         self.transport = transport
         self.title("Controller Machine")
         self._set_icon()
+        self.folder_prompt = FolderPromptService(self)
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=6, pady=6)
@@ -74,12 +105,23 @@ class ControllerWindow(tk.Tk):
         self.resizable(False, False)
 
     def _set_icon(self) -> None:
+        # iconbitmap cobre a barra de título; iconphoto é o que garante o
+        # ícone certo na barra de tarefas/Alt+Tab do Windows — sem os dois,
+        # às vezes o Windows usa o ícone genérico do interpretador Python.
         ico_path = Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
         if ico_path.exists():
             try:
                 self.iconbitmap(default=str(ico_path))
+                self.iconbitmap(str(ico_path))
             except tk.TclError:
                 pass
+
+        try:
+            from assets.generate_icon import build_icon_image
+            self._icon_photo = tk.PhotoImage(master=self, data=_png_bytes(build_icon_image(scale=4)))
+            self.iconphoto(True, self._icon_photo)
+        except Exception:
+            logging.getLogger("gui").exception("Falha ao aplicar iconphoto")
 
     # ------------------------------------------------------------------ #
     # Aba Geral
@@ -93,23 +135,29 @@ class ControllerWindow(tk.Tk):
         # lado — sem forçar width/propagate (isso cortava a altura).
         parent.configure(padding=10)
 
+        # Rótulo numa coluna de largura fixa + campo do lado, igual formulário
+        # de Propriedades do Windows — as duas caixas (Identidade/Servidor)
+        # usam a mesma largura de coluna/campo pra alinhar entre si.
+        LABEL_WIDTH = 12
+        FIELD_WIDTH = 24
+
         identity = ttk.LabelFrame(parent, text="Identidade", padding=8)
         identity.pack(fill="x")
 
-        ttk.Label(identity, text="Controller ID:").grid(row=0, column=0, sticky="w", pady=2)
-        id_entry = ttk.Entry(identity, width=26)
+        ttk.Label(identity, text="Controller ID:", width=LABEL_WIDTH).grid(row=0, column=0, sticky="w", pady=2)
+        id_entry = ttk.Entry(identity, width=FIELD_WIDTH)
         id_entry.insert(0, self.catalog.controller_id)
         id_entry.configure(state="readonly")
-        id_entry.grid(row=1, column=0, sticky="we", pady=(0, 4))
+        id_entry.grid(row=0, column=1, sticky="w", pady=2)
 
-        ttk.Label(identity, text="Secret:").grid(row=2, column=0, sticky="w", pady=2)
-        secret_entry = ttk.Entry(identity, width=26, show="*")
+        ttk.Label(identity, text="Secret:", width=LABEL_WIDTH).grid(row=1, column=0, sticky="w", pady=2)
+        secret_entry = ttk.Entry(identity, width=FIELD_WIDTH, show="*")
         secret_entry.insert(0, self.catalog.secret)
         secret_entry.configure(state="readonly")
-        secret_entry.grid(row=3, column=0, sticky="we", pady=(0, 4))
+        secret_entry.grid(row=1, column=1, sticky="w", pady=2)
 
         id_secret_buttons = ttk.Frame(identity)
-        id_secret_buttons.grid(row=4, column=0, sticky="w", pady=(2, 0))
+        id_secret_buttons.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Button(id_secret_buttons, text="Copiar ID",
                    command=lambda: self._copy_to_clipboard(self.catalog.controller_id)).pack(side="left")
         ttk.Button(id_secret_buttons, text="Copiar secret",
@@ -120,23 +168,23 @@ class ControllerWindow(tk.Tk):
         server = ttk.LabelFrame(parent, text="Servidor", padding=8)
         server.pack(fill="x", pady=(8, 0))
 
-        ttk.Label(server, text="Endereço:").grid(row=0, column=0, sticky="w", pady=2)
-        self.host_entry = ttk.Entry(server, width=20)
+        ttk.Label(server, text="Endereço:", width=LABEL_WIDTH).grid(row=0, column=0, sticky="w", pady=2)
+        self.host_entry = ttk.Entry(server, width=FIELD_WIDTH)
         self.host_entry.insert(0, self.catalog.connector_host)
         self.host_entry.grid(row=0, column=1, sticky="w", pady=2)
 
-        ttk.Label(server, text="Porta:").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Label(server, text="Porta:", width=LABEL_WIDTH).grid(row=1, column=0, sticky="w", pady=2)
         self.port_entry = ttk.Entry(server, width=8)
         self.port_entry.insert(0, str(self.catalog.connector_port))
         self.port_entry.grid(row=1, column=1, sticky="w", pady=2)
 
         ttk.Button(server, text="Salvar e reconectar", command=self._save_and_reconnect).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=2, column=0, columnspan=2, sticky="w", pady=(6, 0)
         )
 
-        ttk.Label(server, text="Status:").grid(row=3, column=0, sticky="w", pady=(8, 0))
-        self.status_label = ttk.Label(server, text="conectando...", foreground="#b8860b", wraplength=280)
-        self.status_label.grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(server, text="Status:", width=LABEL_WIDTH).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        self.status_label = ttk.Label(server, text="conectando...", foreground="#b8860b", wraplength=200)
+        self.status_label.grid(row=3, column=1, sticky="w", pady=(8, 0))
 
     # ------------------------------------------------------------------ #
     # Aba Dispositivos
@@ -336,10 +384,11 @@ class DeviceDialog(tk.Toplevel):
         self.kind_container.grid(row=row, column=0, columnspan=3, sticky="we", pady=(4, 0))
         row += 1
 
-        self.settings_frame = ttk.LabelFrame(body, text="Impressão", padding=6)
+        self.settings_frame = ttk.LabelFrame(body, text="Impressão (cupom térmico)", padding=6)
         self.settings_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
         ttk.Label(self.settings_frame, text="Modo:").grid(row=0, column=0, sticky="w")
-        self.mode_combo = ttk.Combobox(self.settings_frame, values=["escpos", "raw"], state="readonly", width=12)
+        self.mode_combo = ttk.Combobox(self.settings_frame, values=list(MODE_LABELS.values()),
+                                        state="readonly", width=24)
         self.mode_combo.grid(row=0, column=1, sticky="w", padx=(4, 16))
         ttk.Label(self.settings_frame, text="Bobina:").grid(row=0, column=2, sticky="w")
         self.paper_combo = ttk.Combobox(self.settings_frame, values=["40mm", "80mm"], state="readonly", width=8)
@@ -389,7 +438,13 @@ class DeviceDialog(tk.Toplevel):
         ttk.Label(f, text="Pasta:").grid(row=0, column=0, sticky="w")
         self.pdf_folder_entry = ttk.Entry(f, width=28)
         self.pdf_folder_entry.grid(row=0, column=1, sticky="w", padx=(4, 4))
-        ttk.Button(f, text="...", width=3, command=self._browse_folder_path).grid(row=0, column=2)
+        self.pdf_folder_browse_btn = ttk.Button(f, text="...", width=3, command=self._browse_folder_path)
+        self.pdf_folder_browse_btn.grid(row=0, column=2)
+        self.ask_each_time_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            f, text="Perguntar a pasta a cada impressão (sem pasta fixa)",
+            variable=self.ask_each_time_var, command=self._on_ask_each_time_changed,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
         self.kind_frames["pdf_folder"] = f
 
         f = ttk.Frame(self.kind_container)
@@ -424,19 +479,21 @@ class DeviceDialog(tk.Toplevel):
         self._on_kind_changed()
 
         if type_ == "scale":
-            self.brand_combo.configure(values=list_scale_brands())
+            self.brand_combo.configure(values=[SCALE_BRAND_LABELS.get(b, b) for b in list_scale_brands()])
         else:
             self.brand_combo.configure(values=["generic"])
-
-        if type_ in ("printer_common", "printer_fiscal"):
-            self.settings_frame.grid()
-        else:
-            self.settings_frame.grid_remove()
 
     def _on_kind_changed(self) -> None:
         kind = self._kind_by_label.get(self.kind_combo.get())
         if kind:
             self._show_kind_frame(kind)
+
+        type_ = self._current_type()
+        show_settings = type_ in ("printer_common", "printer_fiscal") and kind in KINDS_WITH_PRINT_SETTINGS
+        if show_settings:
+            self.settings_frame.grid()
+        else:
+            self.settings_frame.grid_remove()
 
     def _browse_file_path(self) -> None:
         path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação")
@@ -450,10 +507,15 @@ class DeviceDialog(tk.Toplevel):
             self.pdf_folder_entry.delete(0, tk.END)
             self.pdf_folder_entry.insert(0, path)
 
+    def _on_ask_each_time_changed(self) -> None:
+        state = "disabled" if self.ask_each_time_var.get() else "normal"
+        self.pdf_folder_entry.configure(state=state)
+        self.pdf_folder_browse_btn.configure(state=state)
+
     # ---- carregar valores existentes (modo edição) ----
 
     def _load(self, device: dict | None) -> None:
-        self.mode_combo.set("escpos")
+        self.mode_combo.set(MODE_LABELS["escpos"])
         self.paper_combo.set("80mm")
         self.baud_combo.set("9600")
 
@@ -467,11 +529,14 @@ class DeviceDialog(tk.Toplevel):
         connection = device["connection"]
         self._on_type_changed(preserve_kind=connection.get("kind"))
 
-        self.brand_combo.set(device["brand"])
+        if device["type"] == "scale":
+            self.brand_combo.set(SCALE_BRAND_LABELS.get(device["brand"], device["brand"]))
+        else:
+            self.brand_combo.set(device["brand"])
 
         settings = device.get("settings") or {}
         if settings.get("mode"):
-            self.mode_combo.set(settings["mode"])
+            self.mode_combo.set(MODE_LABELS.get(settings["mode"], settings["mode"]))
         if settings.get("paper_width_mm"):
             self.paper_combo.set(f"{settings['paper_width_mm']}mm")
 
@@ -484,6 +549,9 @@ class DeviceDialog(tk.Toplevel):
         elif kind == "file":
             self.path_entry.insert(0, connection.get("path", ""))
         elif kind == "pdf_folder":
+            if connection.get("ask_each_time"):
+                self.ask_each_time_var.set(True)
+                self._on_ask_each_time_changed()
             self.pdf_folder_entry.insert(0, connection.get("path", ""))
         elif kind == "serial":
             self.serial_port_entry.insert(0, connection.get("serial_port", ""))
@@ -505,18 +573,22 @@ class DeviceDialog(tk.Toplevel):
             return  # já mostrou o aviso
 
         settings = {}
-        if type_ in ("printer_common", "printer_fiscal"):
-            settings["mode"] = self.mode_combo.get() or "escpos"
+        if type_ in ("printer_common", "printer_fiscal") and kind in KINDS_WITH_PRINT_SETTINGS:
+            settings["mode"] = MODE_BY_LABEL.get(self.mode_combo.get(), "escpos")
             paper = self.paper_combo.get()
             if not paper:
                 messagebox.showwarning("Campo obrigatório", "Selecione a largura da bobina.")
                 return
             settings["paper_width_mm"] = int(paper.replace("mm", ""))
 
+        brand = self.brand_combo.get().strip() or "generic"
+        if type_ == "scale":
+            brand = SCALE_BRAND_BY_LABEL.get(brand, brand)
+
         self.result = {
             "label": label,
             "type_": type_,
-            "brand": self.brand_combo.get().strip() or "generic",
+            "brand": brand,
             "connection": connection,
             "settings": settings,
         }
@@ -550,11 +622,15 @@ class DeviceDialog(tk.Toplevel):
             return {"kind": "file", "path": path}
 
         if kind == "pdf_folder":
+            ask_each_time = self.ask_each_time_var.get()
             path = self.pdf_folder_entry.get().strip()
-            if not path:
-                messagebox.showwarning("Campo obrigatório", "Preencha a pasta de destino.")
+            if not ask_each_time and not path:
+                messagebox.showwarning(
+                    "Campo obrigatório",
+                    "Preencha a pasta de destino ou marque \"Perguntar a pasta a cada impressão\".",
+                )
                 return None
-            return {"kind": "pdf_folder", "path": path}
+            return {"kind": "pdf_folder", "path": path, "ask_each_time": ask_each_time}
 
         if kind == "serial":
             serial_port = self.serial_port_entry.get().strip()
