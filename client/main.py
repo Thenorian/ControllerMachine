@@ -79,6 +79,10 @@ def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
             job["data"],
             paper_width_mm=settings.get("paper_width_mm", 80),
             mode=settings.get("mode", "escpos"),
+            encoding=settings.get("encoding", "cp860"),
+            cut_mode=settings.get("cut_mode", "full"),
+            header_text=settings.get("header_text", ""),
+            footer_text=settings.get("footer_text", ""),
         )
 
     if connection["kind"] == "pdf_folder":

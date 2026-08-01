@@ -37,11 +37,18 @@ from devices.escpos import EscPosBuilder, chars_per_line
 
 
 def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: int = 80,
-                       mode: str = "escpos") -> bytes:
+                       mode: str = "escpos", cut_mode: str = "full",
+                       header_text: str = "", footer_text: str = "") -> bytes:
     LINE_WIDTH = chars_per_line(paper_width_mm)
     VALUE_COL = 10  # cabe "-9999999.99" folgado, mesma coluna nos dois tamanhos de bobina
     LEFT_COL = LINE_WIDTH - VALUE_COL
     b = EscPosBuilder(encoding=encoding, plain=(mode == "raw"))
+
+    if header_text:
+        b.align("center")
+        for line in header_text.splitlines():
+            b.line(line)
+        b.separator("-", LINE_WIDTH)
 
     emitente = payload["emitente"]
     b.align("center").bold(True).line(emitente.get("razao_social", "")).bold(False)
@@ -102,7 +109,13 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: in
         b.separator("-", LINE_WIDTH)
         b.align("left").line(payload["mensagem_adicional"])
 
-    b.feed(3).cut()
+    if footer_text:
+        b.separator("-", LINE_WIDTH)
+        b.align("center")
+        for line in footer_text.splitlines():
+            b.line(line)
+
+    b.feed(3).cut(cut_mode)
     return b.build()
 
 
