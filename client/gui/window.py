@@ -22,13 +22,20 @@ class ControllerWindow(tk.Tk):
         self.transport = transport
 
         self.title("Controller Machine")
-        self.geometry("640x420")
 
         self._build_status_frame()
         self._build_device_list()
         self._build_log_area()
         self._refresh_devices()
         self._poll_status()
+
+        # Deixa o Tk calcular o tamanho real que o conteúdo pede (em vez de
+        # forçar um geometry() fixo, que cortava botões/campos assim que a
+        # gente adicionava mais coisa na tela — aí só aparecia tudo depois
+        # de maximizar na mão). minsize trava esse tamanho como o menor
+        # permitido; a janela continua livre pra crescer se o usuário quiser.
+        self.update_idletasks()
+        self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
 
     # ------------------------------------------------------------------ #
 
