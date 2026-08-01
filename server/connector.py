@@ -140,12 +140,20 @@ class ControllerConnector:
             "data": data_base64,
         }, timeout)
 
-    def send_fiscal_job(self, controller_id: str, device_id: str, nfce_payload: dict, timeout: float = 10) -> dict:
-        return self._send_job(controller_id, {
+    def send_fiscal_job(self, controller_id: str, device_id: str, nfce_payload, timeout: float = 10,
+                         data_type: str | None = None) -> dict:
+        """nfce_payload: o dict cru do DANFE (ver devices/printer_fiscal.py no
+        Controller Machine pro contrato de campos) — OU, se `data_type="pdf"`,
+        uma string base64 com um PDF já pronto (o Controller Machine só
+        entrega nesse caso, não renderiza nada)."""
+        job_body = {
             "kind": "print_fiscal_nfce",
             "device_id": device_id,
             "data": nfce_payload,
-        }, timeout)
+        }
+        if data_type is not None:
+            job_body["data_type"] = data_type
+        return self._send_job(controller_id, job_body, timeout)
 
     def send_scale_update(self, controller_id: str, device_id: str, products: list[dict], timeout: float = 15) -> dict:
         return self._send_job(controller_id, {
