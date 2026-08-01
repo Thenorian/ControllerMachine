@@ -33,12 +33,13 @@ Contrato de entrada (o que o Simple ERP manda, via connector.send_fiscal_job):
 """
 from __future__ import annotations
 
-from devices.escpos import EscPosBuilder
-
-LINE_WIDTH = 42
+from devices.escpos import EscPosBuilder, chars_per_line
 
 
-def render_danfe_nfce(payload: dict, encoding: str = "cp860") -> bytes:
+def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: int = 80) -> bytes:
+    LINE_WIDTH = chars_per_line(paper_width_mm)
+    VALUE_COL = 10  # cabe "-9999999.99" folgado, mesma coluna nos dois tamanhos de bobina
+    LEFT_COL = LINE_WIDTH - VALUE_COL
     b = EscPosBuilder(encoding=encoding)
 
     emitente = payload["emitente"]
@@ -60,21 +61,21 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860") -> bytes:
         unit = item["unidade"]
         v_unit = item["valor_unitario"]
         v_total = item["valor_total"]
-        b.line(f"{qtd} {unit} x {v_unit:.2f}".ljust(24) + f"{v_total:>16.2f}")
+        b.line(f"{qtd} {unit} x {v_unit:.2f}".ljust(LEFT_COL) + f"{v_total:>{VALUE_COL}.2f}")
 
     b.separator("-", LINE_WIDTH)
     totais = payload["totais"]
-    b.line(f"{'Total de itens':<26}{len(payload.get('itens', [])):>16}")
-    b.line(f"{'Valor dos produtos':<26}{totais['valor_produtos']:>16.2f}")
+    b.line(f"{'Total de itens':<{LEFT_COL}}{len(payload.get('itens', [])):>{VALUE_COL}}")
+    b.line(f"{'Valor dos produtos':<{LEFT_COL}}{totais['valor_produtos']:>{VALUE_COL}.2f}")
     if totais.get("valor_descontos"):
-        b.line(f"{'Descontos':<26}{-totais['valor_descontos']:>16.2f}")
-    b.bold(True).line(f"{'VALOR A PAGAR':<26}{totais['valor_total']:>16.2f}").bold(False)
+        b.line(f"{'Descontos':<{LEFT_COL}}{-totais['valor_descontos']:>{VALUE_COL}.2f}")
+    b.bold(True).line(f"{'VALOR A PAGAR':<{LEFT_COL}}{totais['valor_total']:>{VALUE_COL}.2f}").bold(False)
 
     b.separator("-", LINE_WIDTH)
     for pagamento in payload.get("pagamentos", []):
-        b.line(f"{pagamento['forma']:<26}{pagamento['valor']:>16.2f}")
+        b.line(f"{pagamento['forma']:<{LEFT_COL}}{pagamento['valor']:>{VALUE_COL}.2f}")
     if payload.get("troco"):
-        b.line(f"{'Troco':<26}{payload['troco']:>16.2f}")
+        b.line(f"{'Troco':<{LEFT_COL}}{payload['troco']:>{VALUE_COL}.2f}")
 
     consumidor = payload.get("consumidor") or {}
     if consumidor.get("cpf_cnpj"):

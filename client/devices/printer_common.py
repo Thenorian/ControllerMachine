@@ -51,6 +51,23 @@ def print_via_tcp(connection: dict, data: bytes, timeout: float = 10) -> None:
         sock.sendall(data)
 
 
+def save_pdf_to_folder(connection: dict, data: bytes, name_hint: str | None = None) -> None:
+    """connection: {"kind": "pdf_folder", "path": "..."} — em vez de mandar
+    pra uma impressora física, só salva o PDF numa pasta (local ou
+    compartilhamento de rede). Uso típico: DANFE que o operador confere/
+    reimprime manualmente depois, ou fluxo sem impressora térmica dedicada.
+    Escreve em arquivo temporário e troca de nome no final (os.replace é
+    atômico) pra nunca deixar meio arquivo sendo lido por outro processo."""
+    folder = connection["path"]
+    os.makedirs(folder, exist_ok=True)
+    filename = f"{name_hint or int(time.time())}.pdf"
+    final_path = os.path.join(folder, filename)
+    tmp_path = final_path + ".tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(data)
+    os.replace(tmp_path, final_path)
+
+
 def print_pdf(connection: dict, data: bytes) -> None:
     """Imprime um PDF já pronto — usa o visualizador padrão do SO (Windows)
     ou `lp` (Linux), que ambos sabem renderizar PDF corretamente (diferente

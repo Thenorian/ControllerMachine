@@ -62,12 +62,30 @@ def _dispatch_print(device: dict, job: dict) -> None:
 
 
 def _dispatch_fiscal(device: dict, job: dict) -> None:
-    data = printer_fiscal.render_danfe_nfce(job["data"])
     connection = device["connection"]
-    if connection["kind"] == "os_printer":
-        printer_common.print_raw(connection, data)
+    is_pdf = job.get("data_type") == "pdf"
+
+    if is_pdf:
+        # Simple ERP (ou o provedor de NFC-e) já manda o DANFE pronto em
+        # PDF — não tem o que renderizar aqui, só entregar.
+        data = base64.b64decode(job["data"])
     else:
+        paper_width_mm = device.get("settings", {}).get("paper_width_mm", 80)
+        data = printer_fiscal.render_danfe_nfce(job["data"], paper_width_mm=paper_width_mm)
+
+    if connection["kind"] == "pdf_folder":
+        if not is_pdf:
+            raise ValueError("connection kind 'pdf_folder' exige job com data_type='pdf'")
+        printer_common.save_pdf_to_folder(connection, data, name_hint=job.get("job_id"))
+    elif connection["kind"] == "os_printer":
+        if is_pdf:
+            printer_common.print_pdf(connection, data)
+        else:
+            printer_common.print_raw(connection, data)
+    elif connection["kind"] == "tcp":
         printer_common.print_via_tcp(connection, data)
+    else:
+        raise ValueError(f"conexão não suportada para impressão fiscal: {connection}")
 
 
 def _dispatch_scale(device: dict, job: dict) -> None:
