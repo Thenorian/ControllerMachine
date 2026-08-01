@@ -25,7 +25,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("main")
 
 
-def handle_job(catalog: DeviceCatalog, job: dict) -> dict:
+def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
+    """ask_folder: callable(title: str) -> str | None, opcional — usado só
+    por dispositivo fiscal configurado como "perguntar a pasta a cada
+    impressão" (ver DeviceDialog em gui/window.py). None quando não há GUI
+    disponível pra perguntar nada (ex.: Linux headless)."""
     kind = job.get("kind")
     device = catalog.get_device(job.get("device_id", ""))
     if device is None:
@@ -35,7 +39,7 @@ def handle_job(catalog: DeviceCatalog, job: dict) -> dict:
         if kind == "print":
             _dispatch_print(device, job)
         elif kind == "print_fiscal_nfce":
-            _dispatch_fiscal(device, job)
+            _dispatch_fiscal(device, job, ask_folder)
         elif kind == "scale_update":
             _dispatch_scale(device, job)
         else:
@@ -61,7 +65,7 @@ def _dispatch_print(device: dict, job: dict) -> None:
         raise ValueError(f"conexão não suportada para impressão: {connection}")
 
 
-def _dispatch_fiscal(device: dict, job: dict) -> None:
+def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
     connection = device["connection"]
     is_pdf = job.get("data_type") == "pdf"
 
@@ -80,7 +84,19 @@ def _dispatch_fiscal(device: dict, job: dict) -> None:
     if connection["kind"] == "pdf_folder":
         if not is_pdf:
             raise ValueError("connection kind 'pdf_folder' exige job com data_type='pdf'")
-        printer_common.save_pdf_to_folder(connection, data, name_hint=job.get("job_id"))
+
+        path = connection.get("path")
+        if connection.get("ask_each_time") or not path:
+            if ask_folder is None:
+                raise RuntimeError(
+                    "dispositivo configurado para perguntar a pasta a cada impressão, "
+                    "mas a interface gráfica não está disponível pra perguntar"
+                )
+            path = ask_folder(f"Salvar DANFE — {device['label']}")
+            if not path:
+                raise RuntimeError("operador não escolheu pasta — DANFE não foi salvo")
+
+        printer_common.save_pdf_to_folder({"path": path}, data, name_hint=job.get("job_id"))
     elif connection["kind"] == "os_printer":
         if is_pdf:
             printer_common.print_pdf(connection, data)
@@ -146,7 +162,7 @@ def run_linux(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
         transport.stop()
 
 
-def run_windows(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
+def run_windows(catalog: DeviceCatalog, transport: ControllerTransport, ask_folder_holder: dict) -> None:
     from gui.tray import HAS_TRAY, install_windows_autostart, run_tray
     from gui.window import ControllerWindow
 
@@ -156,6 +172,7 @@ def run_windows(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
 
     transport.start()
     window = ControllerWindow(catalog, transport)
+    ask_folder_holder["fn"] = window.folder_prompt.ask_folder
 
     if HAS_TRAY:
         run_tray(window)
@@ -170,18 +187,21 @@ def run_windows(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
 
 def main() -> None:
     catalog = DeviceCatalog()
+    # Preenchido só depois que a janela existir (run_windows) — em Linux
+    # (sem GUI) fica None pra sempre, handle_job trata isso.
+    ask_folder_holder: dict = {"fn": None}
     transport = ControllerTransport(
         host=catalog.connector_host,
         port=catalog.connector_port,
         controller_id=catalog.controller_id,
         secret=catalog.secret,
         announce_payload=catalog.to_announce_payload,
-        on_job=lambda job: handle_job(catalog, job),
+        on_job=lambda job: handle_job(catalog, job, ask_folder_holder["fn"]),
     )
 
     system = platform.system()
     if system == "Windows":
-        run_windows(catalog, transport)
+        run_windows(catalog, transport, ask_folder_holder)
     elif system == "Linux":
         run_linux(catalog, transport)
     else:
