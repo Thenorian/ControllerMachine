@@ -10,12 +10,56 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 import socket
 import threading
 import time
 from typing import Callable
 
 logger = logging.getLogger("transport")
+
+# Sem isso, um socket.recv() bloqueado fica esperando pra sempre se o lado
+# de lá some sem mandar um FIN/RST (ex.: `docker rm -f` no deploy do Simple
+# ERP mata o processo, mas nem sempre o RST chega no cliente por causa da
+# rede/NAT no meio do caminho) - o cliente ficava com uma conexão zumbi,
+# achando que ainda tava tudo bem, e só reconectava se alguém clicasse
+# "Salvar e reconectar" na tela (que força fechar o socket na unha). Com
+# keepalive, o próprio SO detecta a conexão morta e devolve erro no recv(),
+# que já cai no loop de reconexão que já existia (_connect_loop).
+_KEEPALIVE_IDLE_SECONDS = 10   # começa a sondar depois de 10s sem tráfego
+_KEEPALIVE_INTERVAL_SECONDS = 5  # intervalo entre sondas
+_KEEPALIVE_PROBES = 3          # desiste (recv() erra) depois de 3 sondas sem resposta
+
+
+def _enable_keepalive(conn: socket.socket) -> None:
+    """Liga TCP keepalive multiplataforma - a sintonia fina (idle/interval/
+    count) é Linux/macOS; no Windows entra via ioctl com outra API. Tudo
+    dentro de try/except porque keepalive é uma otimização de detecção, não
+    algo que deveria derrubar a conexão se a plataforma não suportar algum
+    dos parâmetros."""
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        logger.warning("Não foi possível ligar SO_KEEPALIVE nesse socket")
+        return
+
+    system = platform.system()
+    try:
+        if system == "Windows":
+            # SIO_KEEPALIVE_VALS: (on/off, idle_ms, interval_ms) - Windows não
+            # tem um equivalente direto a TCP_KEEPCNT, só idle e interval.
+            conn.ioctl(socket.SIO_KEEPALIVE_VALS, (
+                1, _KEEPALIVE_IDLE_SECONDS * 1000, _KEEPALIVE_INTERVAL_SECONDS * 1000
+            ))
+        elif system in ("Linux", "Darwin") and hasattr(socket, "TCP_KEEPIDLE"):
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, _KEEPALIVE_IDLE_SECONDS)
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, _KEEPALIVE_INTERVAL_SECONDS)
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, _KEEPALIVE_PROBES)
+        elif system == "Darwin" and hasattr(socket, "TCP_KEEPALIVE"):
+            # macOS mais antigo só tem o parâmetro combinado TCP_KEEPALIVE.
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, _KEEPALIVE_IDLE_SECONDS)
+    except OSError:
+        logger.warning(f"SO_KEEPALIVE ligado, mas não deu pra ajustar os tempos em {system}")
 
 
 class ControllerTransport:
@@ -95,6 +139,7 @@ class ControllerTransport:
             try:
                 self._conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self._conn.connect((self.host, self.port))
+                _enable_keepalive(self._conn)
                 self.server_reachable = True  # TCP ok — mesmo que o registro falhe a seguir
 
                 self._send({
