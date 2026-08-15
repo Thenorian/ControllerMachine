@@ -64,3 +64,12 @@ renomeado ou realocado do lado do Simple ERP.
 - `gui/` — janela Tkinter + tray do Windows.
 - `service_linux.py` — instalador do serviço systemd.
 - `assets/generate_icon.py` — gera o ícone pixel-art usado na bandeja.
+
+## Executável Windows (.exe)
+
+Não é buildado à mão nem versionado no repositório. A action
+`.github/workflows/build-windows-exe.yml` roda num runner Windows e gera o
+`ControllerMachine.exe` (via `ControllerMachine.spec`) automaticamente toda
+vez que uma release é publicada no GitHub, anexando o .exe nela. Também dá
+pra disparar manualmente (`workflow_dispatch`) pra baixar o .exe como
+artifact sem precisar publicar uma release.

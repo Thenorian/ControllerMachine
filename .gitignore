@@ -3,6 +3,7 @@ data.db
 client/config.json
 server/example_controllers.db
 
-# Lixo intermediário do PyInstaller (client/dist/*.exe é o resultado final,
-# esse sim entra no repo — build/ é só cache de build, não precisa versionar)
+# Saída do PyInstaller (o .exe é gerado pela GitHub Action
+# build-windows-exe.yml a cada release publicada, não precisa versionar)
 client/build/
+client/dist/
