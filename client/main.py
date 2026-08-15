@@ -19,9 +19,10 @@ import sys
 from catalog import DeviceCatalog
 from devices import printer_common, printer_fiscal
 from devices.scale import get_formatter
+from logging_setup import setup_logging
 from transport import ControllerTransport
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+setup_logging()
 logger = logging.getLogger("main")
 
 
