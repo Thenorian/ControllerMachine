@@ -1,0 +1,79 @@
+name: Build dos pacotes de instalação
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instala dependências
+        run: |
+          pip install -r requirements-client.txt
+          pip install pyinstaller
+
+      - name: Gera o ControllerMachine.exe
+        run: pyinstaller ControllerMachine.spec
+
+      - name: Gera o instalador (ControllerMachineSetup.exe)
+        working-directory: client/installer
+        run: pyinstaller windows_installer.spec
+
+      - name: Anexa os .exe à release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/ControllerMachine.exe --clobber
+          gh release upload "${{ github.event.release.tag_name }}" installer/dist/ControllerMachineSetup.exe --clobber
+
+      - name: Publica os .exe como artifacts (execução manual)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControllerMachine-windows
+          path: |
+            client/dist/ControllerMachine.exe
+            client/installer/dist/ControllerMachineSetup.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gera o pacote Linux (.tar.gz)
+        run: python3 installer/build_linux_package.py
+
+      - name: Anexa o .tar.gz à release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/ControllerMachine-linux.tar.gz --clobber
+
+      - name: Publica o .tar.gz como artifact (execução manual)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControllerMachine-linux
+          path: client/dist/ControllerMachine-linux.tar.gz

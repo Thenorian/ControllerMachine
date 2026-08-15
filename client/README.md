@@ -64,12 +64,37 @@ renomeado ou realocado do lado do Simple ERP.
 - `gui/` — janela Tkinter + tray do Windows.
 - `service_linux.py` — instalador do serviço systemd.
 - `assets/generate_icon.py` — gera o ícone pixel-art usado na bandeja.
+- `logging_setup.py` — logs em disco (`logs/` ao lado do programa, rotação
+  diária, no máximo 25 arquivos).
+- `installer/` — instaladores Windows/Linux (ver seção abaixo).
 
-## Executável Windows (.exe)
+## Logs
 
-Não é buildado à mão nem versionado no repositório. A action
-`.github/workflows/build-windows-exe.yml` roda num runner Windows e gera o
-`ControllerMachine.exe` (via `ControllerMachine.spec`) automaticamente toda
-vez que uma release é publicada no GitHub, anexando o .exe nela. Também dá
-pra disparar manualmente (`workflow_dispatch`) pra baixar o .exe como
-artifact sem precisar publicar uma release.
+Ficam em `logs/` ao lado de onde o programa está rodando (dentro da pasta
+de instalação, ver `installer/` abaixo). Um arquivo por dia
+(`controller-machine.log`, rotacionado à meia-noite), no máximo 25 arquivos
+guardados — os mais antigos somem sozinhos (`logging_setup.py`).
+
+## Instaladores (Windows / Linux)
+
+Nenhum instalador é buildado à mão nem versionado no repositório. A action
+`.github/workflows/build-packages.yml` roda automaticamente toda vez que uma
+release é publicada no GitHub, gera os três pacotes abaixo e anexa todos na
+release (também dá pra disparar manualmente via `workflow_dispatch`, nesse
+caso os pacotes saem como artifacts em vez de anexados a uma release):
+
+- **`ControllerMachine.exe`** — o programa em si (via `ControllerMachine.spec`).
+- **`ControllerMachineSetup.exe`** — instalador Windows (Tkinter,
+  `installer/windows_installer.py`/`.spec`). Embute o `ControllerMachine.exe`
+  já pronto (por isso builda depois dele), copia pra
+  `C:\thenorian\controller` (escolhível), cria `logs/`, marca "iniciar com o
+  Windows" por padrão (reaproveita `main.py --install-autostart`) e se
+  autoexclui no final se marcado.
+- **`ControllerMachine-linux.tar.gz`** — pacote Linux
+  (`installer/build_linux_package.py`). Não compila nada — Linux roda o
+  Python direto — só empacota o código headless (sem `gui/`, que é só do
+  Windows) junto de `installer/linux/install.sh`. Rodar o `install.sh` de
+  dentro do pacote: cria `~/.thenorian/controller` (escolhível), um `venv`
+  isolado, instala as dependências e registra o serviço systemd (via
+  `service_linux.py`, pede a senha por `sudo` só nessa hora — depois disso
+  o systemd sobe sozinho a cada boot, sem senha nenhuma de novo).
