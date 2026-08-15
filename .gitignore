@@ -3,7 +3,9 @@ data.db
 client/config.json
 server/example_controllers.db
 
-# Saída do PyInstaller (o .exe é gerado pela GitHub Action
-# build-windows-exe.yml a cada release publicada, não precisa versionar)
+# Saída do PyInstaller e dos pacotes de instalação (gerados pela GitHub
+# Action build-packages.yml a cada release publicada, não precisa versionar)
 client/build/
 client/dist/
+client/installer/build/
+client/installer/dist/
