@@ -61,7 +61,8 @@ renomeado ou realocado do lado do Simple ERP.
 - `transport.py` — socket com o connector, reconexão automática.
 - `devices/` — execução dos jobs (impressão comum, fiscal/NFC-e, balança
   por marca em `devices/scale/`).
-- `gui/` — janela Tkinter + tray do Windows.
+- `gui/` — janela Tkinter + tray do Windows. `gui/template_editor.py`
+  contém o editor de modelo de impressão (ver seção abaixo).
 - `service_linux.py` — instalador do serviço systemd.
 - `assets/generate_icon.py` — gera o ícone pixel-art usado na bandeja.
 - `logging_setup.py` — logs em disco (`logs/` ao lado do programa, rotação
@@ -74,6 +75,34 @@ Ficam em `logs/` ao lado de onde o programa está rodando (dentro da pasta
 de instalação, ver `installer/` abaixo). Um arquivo por dia
 (`controller-machine.log`, rotacionado à meia-noite), no máximo 25 arquivos
 guardados — os mais antigos somem sozinhos (`logging_setup.py`).
+
+## Modelo de impressão (DANFE NFC-e / Cupom)
+
+Quem desenha o cupom/nota é sempre o Controller Machine
+(`devices/printer_fiscal.py::render_danfe_nfce`) — o Simple ERP só manda
+dados da venda (itens, totais, atendente, PDV...), nunca layout. Editar o
+dispositivo do tipo "Impressora fiscal (DANFE)" na GUI (Windows) abre a
+seção "Modelo de impressão":
+
+- **Modo Básico**: mostrar/ocultar IE, título do cupom, mensagem padrão da
+  empresa, tamanho/correção de erro do QR Code — qualquer usuário Admin,
+  sempre dentro da estrutura fixa da NFC-e.
+- **Modo Avançado** (botão "Modo Avançado (cupom)...", com aviso de
+  confirmação — reservado à equipe Thenorian, toda alteração é logada em
+  `logs/`): editor de blocos livre, reordena/adiciona/remove — mas **só
+  vale pro cupom**. A trava é estrutural, não é validação: o renderer só lê
+  `blocos_customizados` quando `tipo_documento="cupom"`, e o vocabulário de
+  blocos (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`) não tem QR
+  Code/chave de acesso/protocolo como opção — não tem como um template mal
+  configurado (nem editado à mão no `config.json`) tirar campo obrigatório
+  de uma nota fiscal real.
+- **Exportar/Importar modelo**: baixa/sobe o `template` inteiro como
+  `.json` — configura uma impressora certa e replica pras outras sem
+  reconfigurar campo por campo.
+
+Tudo fica em `device["settings"]["template"]` no `config.json` local — sem
+Linux (sem GUI ainda), editar essa chave direto no arquivo, mesmo padrão
+do resto das configurações.
 
 ## Instaladores (Windows / Linux)
 
