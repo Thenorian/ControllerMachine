@@ -76,14 +76,19 @@ def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
         data = base64.b64decode(job["data"])
     else:
         settings = device.get("settings", {})
+        template = dict(settings.get("template") or {})
+        # Compat: header_text/footer_text viviam soltos em settings antes do
+        # editor de modelo existir — se o template novo não trouxer esses
+        # campos, cai pros antigos, pra não apagar config de quem já tinha.
+        template.setdefault("header_text", settings.get("header_text", ""))
+        template.setdefault("footer_text", settings.get("footer_text", ""))
         data = printer_fiscal.render_danfe_nfce(
             job["data"],
             paper_width_mm=settings.get("paper_width_mm", 80),
             mode=settings.get("mode", "escpos"),
             encoding=settings.get("encoding", "cp860"),
             cut_mode=settings.get("cut_mode", "full"),
-            header_text=settings.get("header_text", ""),
-            footer_text=settings.get("footer_text", ""),
+            template=template,
         )
 
     if connection["kind"] == "pdf_folder":
