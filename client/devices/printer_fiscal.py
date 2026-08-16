@@ -77,7 +77,7 @@ DEFAULT_TEMPLATE = {
 # de QR Code, chave de acesso, protocolo, número ou série: essas peças são
 # exclusivas do fluxo fiscal fixo, nem aparecem como opção pra montar um
 # cupom customizado.
-_TIPOS_BLOCO_VALIDOS = {
+TIPOS_BLOCO_VALIDOS = {
     "cabecalho", "atendente", "itens", "totais", "pagamentos", "consumidor",
     "mensagem_empresa", "mensagem_fisco", "texto", "separador", "espaco",
 }
@@ -159,7 +159,7 @@ def _renderizar_bloco(b: EscPosBuilder, bloco: dict, payload: dict, tpl: dict,
     vira uma chamada aqui. Tipo desconhecido/inválido é ignorado (nunca
     derruba a impressão inteira por um bloco malformado)."""
     tipo = bloco.get("tipo")
-    if tipo not in _TIPOS_BLOCO_VALIDOS:
+    if tipo not in TIPOS_BLOCO_VALIDOS:
         return
 
     if tipo == "cabecalho":
