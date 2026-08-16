@@ -10,7 +10,7 @@ from __future__ import annotations
 # Colunas de texto por linha, Font A (fonte padrão) — varia com a largura
 # física da bobina. Números redondos usuais de mercado; se um equipamento
 # específico imprimir com fonte diferente, ajustar aqui.
-CHARS_PER_LINE = {40: 32, 80: 48}
+CHARS_PER_LINE = {58: 32, 80: 48}
 
 
 def chars_per_line(paper_width_mm: int) -> int:
@@ -34,6 +34,17 @@ BOLD_OFF = ESC + b"E" + b"\x00"
 CUT_FULL = GS + b"V" + b"\x00"
 CUT_PARTIAL = GS + b"V" + b"\x01"
 LINE_FEED = b"\n"
+
+QR_ERROR_LEVELS = {"L": 0x30, "M": 0x31, "Q": 0x32, "H": 0x33}
+
+
+def format_brl(value: float) -> str:
+    """Formata valor monetário no padrão exigido pelo Manual do DANFE NFC-e
+    (Divisões II e III): vírgula decimal, ponto como separador de milhar —
+    ex.: 1234.5 -> "1.234,50". Nunca usar f"{v:.2f}" puro num DANFE (isso dá
+    "1234.50", fora do padrão)."""
+    inteiro, decimal = f"{value:,.2f}".split(".")
+    return f"{inteiro.replace(',', '.')},{decimal}"
 
 # Encodings mais comuns em impressora térmica nacional — cp860 (padrão desse
 # módulo) é o de fato mais usado no Brasil, os outros existem porque alguns
@@ -74,6 +85,34 @@ class EscPosBuilder:
 
     def separator(self, char: str = "-", width: int = 42) -> "EscPosBuilder":
         return self.line(char * width)
+
+    def qr_code(self, data: str, module_size: int = 6, error_correction: str = "M") -> "EscPosBuilder":
+        """QR Code 2D real via GS ( k — extensão de fato criada pela Epson,
+        hoje replicada pela maioria das impressoras térmicas nacionais
+        (Bematech, Elgin, Daruma, Tanca etc.), não é parte formal do padrão
+        ESC/POS. Referência: Manual de Especificações Técnicas do DANFE
+        NFC-e e QR Code — módulo mínimo pra caber em 25mm x 25mm com a
+        largura de bobina usada aqui é module_size=6 a 8, ajustar se algum
+        equipamento específico imprimir grande/pequeno demais.
+
+        Em modo plain (impressora genérica, texto puro) o comando binário
+        não seria entendido — imprime a URL como texto em vez de travar
+        a impressora com bytes que ela não reconhece."""
+        if self.plain:
+            return self.line(data)
+
+        ec_level = QR_ERROR_LEVELS[error_correction]
+        payload = data.encode("utf-8")
+        length = len(payload) + 3
+        pL, pH = length & 0xFF, (length >> 8) & 0xFF
+
+        self._buffer += GS + b"(k" + bytes([4, 0]) + b"1A" + bytes([50, 0])  # modelo 2
+        self._buffer += GS + b"(k" + bytes([3, 0]) + b"1C" + bytes([module_size])  # tamanho do módulo
+        self._buffer += GS + b"(k" + bytes([3, 0]) + b"1E" + bytes([ec_level])  # correção de erro
+        self._buffer += GS + b"(k" + bytes([pL, pH]) + b"1P0" + payload  # armazena os dados
+        self._buffer += GS + b"(k" + bytes([3, 0]) + b"1Q0"  # imprime o símbolo armazenado
+        self._buffer += LINE_FEED
+        return self
 
     def feed(self, lines: int = 1) -> "EscPosBuilder":
         self._buffer += LINE_FEED * lines
