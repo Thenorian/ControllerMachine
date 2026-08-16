@@ -408,7 +408,7 @@ class DeviceDialog(tk.Toplevel):
                                         state="readonly", width=22)
         self.mode_combo.grid(row=0, column=1, sticky="w", padx=(4, 16))
         ttk.Label(self.settings_frame, text="Bobina:").grid(row=0, column=2, sticky="w")
-        self.paper_combo = ttk.Combobox(self.settings_frame, values=["40mm", "80mm"], state="readonly", width=8)
+        self.paper_combo = ttk.Combobox(self.settings_frame, values=["58mm", "80mm"], state="readonly", width=8)
         self.paper_combo.grid(row=0, column=3, sticky="w", padx=(4, 0))
 
         ttk.Label(self.settings_frame, text="Caracteres:").grid(row=1, column=0, sticky="w", pady=(4, 0))
