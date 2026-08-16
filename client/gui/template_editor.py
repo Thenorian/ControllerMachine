@@ -14,11 +14,12 @@ interface e do log da alteração.
 """
 from __future__ import annotations
 
+import json
 import logging
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
-from devices.printer_fiscal import DEFAULT_TEMPLATE
+from devices.printer_fiscal import DEFAULT_TEMPLATE, TIPOS_BLOCO_VALIDOS
 
 logger = logging.getLogger("template_editor")
 
@@ -57,6 +58,16 @@ AVISO_TEXTO = (
     "implicação FISCAL — mexa aqui só se souber exatamente o que está "
     "fazendo."
 )
+
+
+def _blocos_validos(blocos) -> list[dict]:
+    """Filtra uma lista de blocos crua (ex.: vinda de um .json importado) —
+    descarta silenciosamente qualquer item que não seja um dict com um
+    "tipo" reconhecido, em vez de deixar isso quebrar a listbox do editor
+    ou (pior) o job de impressão real mais tarde."""
+    if not isinstance(blocos, list):
+        return []
+    return [b for b in blocos if isinstance(b, dict) and b.get("tipo") in TIPOS_BLOCO_VALIDOS]
 
 
 def _bloco_descricao(bloco: dict) -> str:
@@ -105,6 +116,11 @@ class TemplateBasicFrame(ttk.LabelFrame):
         self.advanced_status = ttk.Label(self, text="", foreground="#a15c00")
         self.advanced_status.grid(row=5, column=0, columnspan=4, sticky="w")
 
+        io_row = ttk.Frame(self)
+        io_row.grid(row=6, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Button(io_row, text="Exportar modelo...", command=self._export).pack(side="left")
+        ttk.Button(io_row, text="Importar modelo...", command=self._import).pack(side="left", padx=(6, 0))
+
     def load(self, template: dict) -> None:
         tpl = {**DEFAULT_TEMPLATE, **(template or {})}
         self.mostrar_ie_var.set(bool(tpl["mostrar_ie"]))
@@ -115,7 +131,7 @@ class TemplateBasicFrame(ttk.LabelFrame):
         self.qr_module_spin.delete(0, tk.END)
         self.qr_module_spin.insert(0, str(tpl["qr_module_size"]))
         self.qr_ec_combo.set(tpl["qr_error_correction"])
-        self._blocos_customizados = tpl.get("blocos_customizados") or None
+        self._blocos_customizados = _blocos_validos(tpl.get("blocos_customizados")) or None
         self._update_advanced_status()
 
     def read(self) -> dict:
@@ -160,6 +176,48 @@ class TemplateBasicFrame(ttk.LabelFrame):
             )
         self._blocos_customizados = novo
         self._update_advanced_status()
+
+    def _export(self) -> None:
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Exportar modelo de impressão",
+            defaultextension=".json", filetypes=[("Modelo JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.read(), f, ensure_ascii=False, indent=2)
+        except OSError as err:
+            messagebox.showerror("Exportar modelo", f"Falha ao salvar o arquivo: {err}", parent=self)
+            return
+        messagebox.showinfo("Exportar modelo", "Modelo exportado com sucesso.", parent=self)
+
+    def _import(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self, title="Importar modelo de impressão",
+            filetypes=[("Modelo JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                template = json.load(f)
+        except (OSError, json.JSONDecodeError) as err:
+            messagebox.showerror("Importar modelo", f"Arquivo inválido: {err}", parent=self)
+            return
+        if not isinstance(template, dict):
+            messagebox.showerror("Importar modelo", "Arquivo inválido: não é um modelo de impressão.", parent=self)
+            return
+
+        antigo = self._blocos_customizados
+        self.load(template)
+        novo = self._blocos_customizados
+        if antigo != novo:
+            logger.warning(
+                "Modelo AVANÇADO do cupom importado de %s — %d bloco(s) antes, %d bloco(s) depois: %r -> %r",
+                path, len(antigo or []), len(novo or []), antigo, novo,
+            )
+        messagebox.showinfo("Importar modelo", "Modelo importado — revise os campos e salve o dispositivo.", parent=self)
 
 
 class _AdvancedWarningDialog(tk.Toplevel):
