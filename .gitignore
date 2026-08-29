@@ -1,6 +1,8 @@
 __pycache__/
 data.db
 client/config.json
+client/logs/
+client/print_history.db
 server/example_controllers.db
 
 # Saída do PyInstaller e dos pacotes de instalação (gerados pela GitHub

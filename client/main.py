@@ -16,6 +16,7 @@ import logging
 import platform
 import sys
 
+import print_history
 from catalog import DeviceCatalog
 from devices import printer_common, printer_fiscal
 from devices.scale import get_formatter
@@ -36,6 +37,8 @@ def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
     if device is None:
         return {"status": "error", "message": f"dispositivo desconhecido: {job.get('device_id')}"}
 
+    is_print_job = kind in ("print", "print_fiscal_nfce")
+
     try:
         if kind == "print":
             _dispatch_print(device, job)
@@ -47,9 +50,27 @@ def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
             return {"status": "error", "message": f"kind desconhecido: {kind}"}
     except Exception as err:
         logger.exception(f"Falha executando job {kind} no device {device['label']}")
+        if is_print_job:
+            print_history.registrar(
+                device["device_id"], device["label"], kind, _job_tipo_documento(kind, job),
+                sucesso=False, mensagem=str(err),
+            )
         return {"status": "error", "message": str(err)}
 
+    if is_print_job:
+        print_history.registrar(
+            device["device_id"], device["label"], kind, _job_tipo_documento(kind, job), sucesso=True,
+        )
     return {"status": "done"}
+
+
+def _job_tipo_documento(kind: str, job: dict) -> str | None:
+    """"nfce"/"cupom" pro job fiscal (vem do próprio payload da venda) —
+    None pra impressão comum (job "print" não carrega esse conceito) e pro
+    fiscal já vindo pronto em PDF (job["data"] é base64, não o payload)."""
+    if kind != "print_fiscal_nfce" or job.get("data_type") == "pdf":
+        return None
+    return (job.get("data") or {}).get("tipo_documento")
 
 
 def _dispatch_print(device: dict, job: dict) -> None:

@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 import queue
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+import print_history
 from catalog import DeviceCatalog
 from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
@@ -101,16 +103,20 @@ class ControllerWindow(tk.Tk):
 
         general_tab = ttk.Frame(notebook)
         devices_tab = ttk.Frame(notebook)
+        history_tab = ttk.Frame(notebook)
         log_tab = ttk.Frame(notebook)
         notebook.add(general_tab, text="Geral")
         notebook.add(devices_tab, text="Dispositivos")
+        notebook.add(history_tab, text="Histórico")
         notebook.add(log_tab, text="Log")
 
         self._build_general_tab(general_tab)
         self._build_devices_tab(devices_tab)
+        self._build_history_tab(history_tab)
         self._build_log_tab(log_tab)
         self._refresh_devices()
         self._poll_status()
+        self._poll_history()
 
         # Tamanho fixo, como janela de Propriedades do Windows (Propriedades
         # de Usuário, de Pasta etc.) — não é redimensionável. Deixa o Tk
@@ -227,6 +233,44 @@ class ControllerWindow(tk.Tk):
         ttk.Button(buttons, text="Adicionar", width=10, command=self._add_device).pack(fill="x", pady=2)
         ttk.Button(buttons, text="Editar", width=10, command=self._edit_selected).pack(fill="x", pady=2)
         ttk.Button(buttons, text="Remover", width=10, command=self._remove_selected).pack(fill="x", pady=2)
+
+    # ------------------------------------------------------------------ #
+    # Aba Histórico — ver print_history.py (SQLite local, só metadado, nunca
+    # o conteúdo impresso). Atualiza sozinha a cada 5s (mesmo espírito do
+    # status de conexão) e também tem botão manual, pra não deixar o
+    # operador esperando o próximo ciclo depois de mandar um teste de
+    # impressão e querer conferir na hora.
+    # ------------------------------------------------------------------ #
+
+    def _build_history_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=10)
+
+        columns = ("quando", "dispositivo", "documento", "status", "mensagem")
+        self.history_tree = ttk.Treeview(parent, columns=columns, show="headings", height=12)
+        headings = {"quando": "Quando", "dispositivo": "Dispositivo", "documento": "Documento",
+                    "status": "Status", "mensagem": "Mensagem"}
+        widths = {"quando": 130, "dispositivo": 110, "documento": 70, "status": 55, "mensagem": 200}
+        for col in columns:
+            self.history_tree.heading(col, text=headings[col])
+            self.history_tree.column(col, width=widths[col])
+        self.history_tree.pack(fill="both", expand=True)
+
+        ttk.Button(parent, text="Atualizar", command=self._refresh_history).pack(anchor="w", pady=(6, 0))
+        self._refresh_history()
+
+    def _refresh_history(self) -> None:
+        self.history_tree.delete(*self.history_tree.get_children())
+        for row in print_history.listar(limite=200):
+            quando = datetime.fromtimestamp(row["timestamp"]).strftime("%d/%m/%Y %H:%M:%S")
+            documento = row["tipo_documento"] or "-"
+            status = "OK" if row["sucesso"] else "Falhou"
+            self.history_tree.insert("", "end", values=(
+                quando, row["device_label"], documento, status, row["mensagem"] or "",
+            ))
+
+    def _poll_history(self) -> None:
+        self._refresh_history()
+        self.after(5000, self._poll_history)
 
     # ------------------------------------------------------------------ #
     # Aba Log
@@ -421,18 +465,17 @@ class DeviceDialog(tk.Toplevel):
                                        state="readonly", width=8)
         self.cut_combo.grid(row=1, column=3, sticky="w", padx=(4, 0), pady=(4, 0))
 
-        ttk.Label(self.settings_frame, text="Cabeçalho:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.header_entry = ttk.Entry(self.settings_frame, width=40)
-        self.header_entry.grid(row=2, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
-
-        ttk.Label(self.settings_frame, text="Rodapé:").grid(row=3, column=0, sticky="w", pady=(4, 0))
-        self.footer_entry = ttk.Entry(self.settings_frame, width=40)
-        self.footer_entry.grid(row=3, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
         row += 1
 
-        self.template_frame = TemplateBasicFrame(body)
+        # Cabeçalho/Rodapé viraram campos de texto dentro do próprio
+        # TemplateBasicFrame (aceitam placeholder/repetição e têm
+        # pré-visualização) — não ficam mais soltos aqui.
+        self.template_frame = TemplateBasicFrame(body, get_paper_width_mm=self._paper_width_mm)
         self.template_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
         row += 1
+        # Bind depois de criar o template_frame — troca de bobina precisa
+        # recalcular a largura dos campos de texto e a pré-visualização.
+        self.paper_combo.bind("<<ComboboxSelected>>", lambda _e: self.template_frame.on_paper_changed())
 
         self._build_kind_frames()
 
@@ -444,6 +487,16 @@ class DeviceDialog(tk.Toplevel):
         self._load(device)
         self.transient(parent)
         _make_dialog_visible(self)
+
+    def _paper_width_mm(self) -> int:
+        """Largura de bobina (mm) atual do formulário — usada pelo
+        TemplateBasicFrame só pra dimensionar campos/pré-visualização;
+        default 80 se o combo ainda não tiver valor válido (ex.: no
+        instante em que o próprio TemplateBasicFrame está sendo montado)."""
+        try:
+            return int(self.paper_combo.get().replace("mm", ""))
+        except (TypeError, ValueError):
+            return 80
 
     # ---- sub-formulários por kind de conexão ----
 
@@ -590,11 +643,13 @@ class DeviceDialog(tk.Toplevel):
             self.encoding_combo.set(ENCODING_LABELS.get(settings["encoding"], settings["encoding"]))
         if settings.get("cut_mode"):
             self.cut_combo.set(CUT_LABELS.get(settings["cut_mode"], settings["cut_mode"]))
-        template = settings.get("template") or {}
+        template = dict(settings.get("template") or {})
         # Compat: header_text/footer_text viviam soltos em settings antes do
         # editor de modelo existir (ver main.py::_dispatch_fiscal, mesma regra).
-        self.header_entry.insert(0, template.get("header_text", settings.get("header_text", "")))
-        self.footer_entry.insert(0, template.get("footer_text", settings.get("footer_text", "")))
+        if not template.get("header_text") and settings.get("header_text"):
+            template["header_text"] = settings["header_text"]
+        if not template.get("footer_text") and settings.get("footer_text"):
+            template["footer_text"] = settings["footer_text"]
         self.template_frame.load(template)
 
         kind = connection.get("kind")
@@ -640,12 +695,7 @@ class DeviceDialog(tk.Toplevel):
             settings["encoding"] = ENCODING_BY_LABEL.get(self.encoding_combo.get(), "cp860")
             settings["cut_mode"] = CUT_BY_LABEL.get(self.cut_combo.get(), "full")
 
-            template = self.template_frame.read()
-            if self.header_entry.get().strip():
-                template["header_text"] = self.header_entry.get().strip()
-            if self.footer_entry.get().strip():
-                template["footer_text"] = self.footer_entry.get().strip()
-            settings["template"] = template
+            settings["template"] = self.template_frame.read()
 
         brand = self.brand_combo.get().strip() or "generic"
         if type_ == "scale":
