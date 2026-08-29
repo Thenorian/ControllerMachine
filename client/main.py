@@ -18,7 +18,7 @@ import sys
 
 import print_history
 from catalog import DeviceCatalog
-from devices import printer_common, printer_fiscal
+from devices import printer_common, printer_fiscal, printer_cash
 from devices.scale import get_formatter
 from logging_setup import setup_logging
 from transport import ControllerTransport
@@ -95,6 +95,17 @@ def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
         # Simple ERP (ou o provedor de NFC-e) já manda o DANFE pronto em
         # PDF — não tem o que renderizar aqui, só entregar.
         data = base64.b64decode(job["data"])
+    elif (job.get("data") or {}).get("tipo_documento") == "caixa":
+        # Cupom de abertura/fechamento de caixa - documento interno, nunca
+        # fiscal, renderer isolado do fluxo de nota (ver devices/printer_cash.py).
+        settings = device.get("settings", {})
+        data = printer_cash.render_cupom_caixa(
+            job["data"],
+            paper_width_mm=settings.get("paper_width_mm", 80),
+            mode=settings.get("mode", "escpos"),
+            encoding=settings.get("encoding", "cp860"),
+            cut_mode=settings.get("cut_mode", "full"),
+        )
     else:
         settings = device.get("settings", {})
         template = dict(settings.get("template") or {})
