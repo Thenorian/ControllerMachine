@@ -19,9 +19,50 @@ import logging
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from devices.printer_fiscal import DEFAULT_TEMPLATE, TIPOS_BLOCO_VALIDOS
+from devices.escpos import chars_per_line
+from devices.printer_fiscal import DEFAULT_TEMPLATE, TIPOS_BLOCO_VALIDOS, render_danfe_nfce
 
 logger = logging.getLogger("template_editor")
+
+# Placeholders aceitos em Cabeçalho/Rodapé/Mensagem da empresa — ver
+# devices/template_text.py (motor) e devices/printer_fiscal.py::
+# _contexto_template (de onde vem o valor de cada um). Mantido em sincronia
+# manualmente com aquela função — um é o motor, este é a documentação/UI.
+CAMPOS_DISPONIVEIS = (
+    "razao_social", "cnpj", "cpf", "ie", "endereco", "atendente", "pdv_label",
+    "numero", "serie", "data_emissao", "chave_acesso", "protocolo_autorizacao",
+    "valor_total", "valor_produtos",
+)
+AJUDA_TEMPLATE = (
+    "Use {{campo}} pra inserir um dado (ex.: {{razao_social}}) e {\"-\"*20} "
+    "pra repetir um caractere (ex.: uma linha de traços). Campos disponíveis: "
+    + ", ".join(f"{{{{{c}}}}}" for c in CAMPOS_DISPONIVEIS)
+)
+
+# Dado fictício só pra pré-visualização — nunca é impresso de verdade, existe
+# só pra mostrar como o modelo fica na bobina enquanto edita.
+_PREVIEW_PAYLOAD = {
+    "tipo_documento": "nfce",
+    "chave_acesso": "0" * 44,
+    "ambiente": "homologacao",
+    "numero": "1", "serie": "1", "data_emissao": "29/08/2026 10:00:00",
+    "protocolo_autorizacao": "123456789012345", "data_hora_autorizacao": "29/08/2026 10:00:05",
+    "url_consulta_chave": "www.nfce.fazenda.gov.br",
+    "qrcode_url": "https://exemplo.com",
+    "emitente": {
+        "cnpj": "00.000.000/0001-00", "razao_social": "Empresa Exemplo LTDA",
+        "ie": "123.456.789", "endereco": "Rua Exemplo, 123 - Centro",
+    },
+    "consumidor": {},
+    "atendente": "Funcionario de Exemplo",
+    "itens": [
+        {"codigo": "7891234567890", "descricao": "Produto de exemplo", "unidade": "UN",
+         "quantidade": 2, "valor_unitario": 10.0, "valor_total": 20.0},
+    ],
+    "totais": {"valor_produtos": 20.0, "valor_descontos": 0, "valor_total": 20.0},
+    "pagamentos": [{"forma": "Dinheiro", "valor": 20.0}],
+    "troco": 0,
+}
 
 # Ordem de exibição no seletor "Adicionar bloco" — texto/separador/espaço
 # primeiro (o que a maioria vai usar), depois os blocos que puxam dado real
@@ -84,60 +125,152 @@ def _bloco_descricao(bloco: dict) -> str:
 
 
 class TemplateBasicFrame(ttk.LabelFrame):
-    """Modo Básico — campos direto no formulário de editar dispositivo."""
+    """Modo Básico — campos direto no formulário de editar dispositivo.
+    Cabeçalho/Rodapé/Mensagem da empresa aceitam os placeholders/repetição
+    de devices/template_text.py (ver CAMPOS_DISPONIVEIS/AJUDA_TEMPLATE)."""
 
-    def __init__(self, parent):
+    _MONO_FONT = ("Consolas", 9)
+
+    def __init__(self, parent, get_paper_width_mm):
+        """get_paper_width_mm: callable que devolve a largura de bobina (mm)
+        atualmente selecionada no resto do formulário (window.py::DeviceDialog)
+        — usada só pra dimensionar os campos de texto e a pré-visualização,
+        nunca guardada aqui (sempre lê o valor mais atual do resto do
+        formulário, inclusive depois de trocar a bobina sem fechar o diálogo)."""
         super().__init__(parent, text="Modelo de impressão", padding=6)
+        self._get_paper_width_mm = get_paper_width_mm
         self._blocos_customizados: list[dict] | None = None  # só o Modo Avançado mexe nisso
 
+        row = 0
         self.mostrar_ie_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self, text="Mostrar Inscrição Estadual (IE)", variable=self.mostrar_ie_var).grid(
-            row=0, column=0, columnspan=4, sticky="w"
-        )
+        ttk.Checkbutton(self, text="Mostrar Inscrição Estadual (IE)", variable=self.mostrar_ie_var,
+                        command=self._refresh_preview).grid(row=row, column=0, columnspan=4, sticky="w")
+        row += 1
 
-        ttk.Label(self, text="Título do cupom:").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(self, text="Título do cupom:").grid(row=row, column=0, sticky="w", pady=(4, 0))
         self.cupom_titulo_entry = ttk.Entry(self, width=32)
-        self.cupom_titulo_entry.grid(row=1, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
+        self.cupom_titulo_entry.grid(row=row, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
+        self.cupom_titulo_entry.bind("<KeyRelease>", lambda _e: self._refresh_preview())
+        row += 1
 
-        ttk.Label(self, text="Mensagem padrão da empresa:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.mensagem_empresa_entry = ttk.Entry(self, width=42)
-        self.mensagem_empresa_entry.grid(row=2, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
+        ttk.Label(self, text="Cabeçalho:").grid(row=row, column=0, sticky="nw", pady=(4, 0))
+        self.header_text = self._novo_campo_texto(row)
+        row += 1
 
-        ttk.Label(self, text="QR Code — módulo:").grid(row=3, column=0, sticky="w", pady=(4, 0))
-        self.qr_module_spin = ttk.Spinbox(self, from_=1, to=16, width=5)
-        self.qr_module_spin.grid(row=3, column=1, sticky="w", padx=(4, 16), pady=(4, 0))
-        ttk.Label(self, text="Correção de erro:").grid(row=3, column=2, sticky="w", pady=(4, 0))
+        ttk.Label(self, text="Rodapé:").grid(row=row, column=0, sticky="nw", pady=(4, 0))
+        self.footer_text = self._novo_campo_texto(row)
+        row += 1
+
+        ttk.Label(self, text="Mensagem padrão da empresa:").grid(row=row, column=0, sticky="nw", pady=(4, 0))
+        self.mensagem_empresa_text = self._novo_campo_texto(row)
+        row += 1
+
+        ttk.Label(self, text=AJUDA_TEMPLATE, foreground="#555", wraplength=360, justify="left").grid(
+            row=row, column=0, columnspan=4, sticky="w", pady=(0, 6)
+        )
+        row += 1
+
+        ttk.Label(self, text="QR Code — módulo:").grid(row=row, column=0, sticky="w", pady=(4, 0))
+        self.qr_module_spin = ttk.Spinbox(self, from_=1, to=16, width=5, command=self._refresh_preview)
+        self.qr_module_spin.grid(row=row, column=1, sticky="w", padx=(4, 16), pady=(4, 0))
+        self.qr_module_spin.bind("<KeyRelease>", lambda _e: self._refresh_preview())
+        ttk.Label(self, text="Correção de erro:").grid(row=row, column=2, sticky="w", pady=(4, 0))
         self.qr_ec_combo = ttk.Combobox(self, values=["L", "M", "Q", "H"], state="readonly", width=4)
-        self.qr_ec_combo.grid(row=3, column=3, sticky="w", padx=(4, 0), pady=(4, 0))
+        self.qr_ec_combo.grid(row=row, column=3, sticky="w", padx=(4, 0), pady=(4, 0))
+        self.qr_ec_combo.bind("<<ComboboxSelected>>", lambda _e: self._refresh_preview())
+        row += 1
+
+        # Campos adicionais — de propósito por último: os principais do
+        # formulário são os da venda (cabeçalho/itens/totais/etc., fixos ou
+        # definidos acima); estes dois são só metadado do posto físico onde
+        # a impressora está instalada, não da venda em si.
+        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=4, sticky="we", pady=(8, 4))
+        row += 1
+        ttk.Label(self, text="Campos adicionais", foreground="#555").grid(row=row, column=0, columnspan=4, sticky="w")
+        row += 1
+
+        ttk.Label(self, text="Nome do PDV/Caixa:").grid(row=row, column=0, sticky="w", pady=(4, 0))
+        self.pdv_label_entry = ttk.Entry(self, width=24)
+        self.pdv_label_entry.grid(row=row, column=1, sticky="w", padx=(4, 0), pady=(4, 0))
+        self.pdv_label_entry.bind("<KeyRelease>", lambda _e: self._refresh_preview())
+        ttk.Label(self, text="(nunca o nome do dispositivo — some da nota se vazio)",
+                  foreground="#888").grid(row=row, column=2, columnspan=2, sticky="w", pady=(4, 0))
+        row += 1
+
+        self.fonte_pequena_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(self, text="Fonte reduzida (cabe mais texto por linha)",
+                        variable=self.fonte_pequena_var, command=self._on_fonte_changed).grid(
+            row=row, column=0, columnspan=4, sticky="w", pady=(4, 0)
+        )
+        row += 1
 
         ttk.Button(self, text="Modo Avançado (cupom)...", command=self._open_advanced).grid(
-            row=4, column=0, columnspan=4, sticky="w", pady=(8, 0)
+            row=row, column=0, columnspan=4, sticky="w", pady=(8, 0)
         )
+        row += 1
         self.advanced_status = ttk.Label(self, text="", foreground="#a15c00")
-        self.advanced_status.grid(row=5, column=0, columnspan=4, sticky="w")
+        self.advanced_status.grid(row=row, column=0, columnspan=4, sticky="w")
+        row += 1
 
         io_row = ttk.Frame(self)
-        io_row.grid(row=6, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        io_row.grid(row=row, column=0, columnspan=4, sticky="w", pady=(8, 0))
         ttk.Button(io_row, text="Exportar modelo...", command=self._export).pack(side="left")
         ttk.Button(io_row, text="Importar modelo...", command=self._import).pack(side="left", padx=(6, 0))
+        row += 1
+
+        ttk.Label(self, text="Pré-visualização:").grid(row=row, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        row += 1
+        self.preview_text = tk.Text(self, height=16, font=self._MONO_FONT, state="disabled",
+                                     background="#f5f5f0")
+        self.preview_text.grid(row=row, column=0, columnspan=4, sticky="we", pady=(2, 0))
+
+    def _novo_campo_texto(self, row: int) -> tk.Text:
+        widget = tk.Text(self, height=3, font=self._MONO_FONT)
+        widget.grid(row=row, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
+        widget.bind("<KeyRelease>", lambda _e: self._refresh_preview())
+        return widget
+
+    def _on_fonte_changed(self) -> None:
+        self._ajustar_largura_campos()
+        self._refresh_preview()
+
+    def on_paper_changed(self) -> None:
+        """Chamado de fora (window.py) quando o combo de bobina muda — a
+        largura dos campos de texto e da pré-visualização precisa acompanhar,
+        senão fica mostrando uma largura que não é mais a real."""
+        self._ajustar_largura_campos()
+        self._refresh_preview()
+
+    def _ajustar_largura_campos(self) -> None:
+        largura = chars_per_line(self._get_paper_width_mm(), self.fonte_pequena_var.get())
+        for widget in (self.header_text, self.footer_text, self.mensagem_empresa_text, self.preview_text):
+            widget.configure(width=largura)
 
     def load(self, template: dict) -> None:
         tpl = {**DEFAULT_TEMPLATE, **(template or {})}
         self.mostrar_ie_var.set(bool(tpl["mostrar_ie"]))
         self.cupom_titulo_entry.delete(0, tk.END)
         self.cupom_titulo_entry.insert(0, tpl["cupom_titulo"])
-        self.mensagem_empresa_entry.delete(0, tk.END)
-        self.mensagem_empresa_entry.insert(0, tpl["mensagem_empresa"])
+        self._set_text(self.header_text, tpl["header_text"])
+        self._set_text(self.footer_text, tpl["footer_text"])
+        self._set_text(self.mensagem_empresa_text, tpl["mensagem_empresa"])
         self.qr_module_spin.delete(0, tk.END)
         self.qr_module_spin.insert(0, str(tpl["qr_module_size"]))
         self.qr_ec_combo.set(tpl["qr_error_correction"])
+        self.pdv_label_entry.delete(0, tk.END)
+        self.pdv_label_entry.insert(0, tpl["pdv_label"])
+        self.fonte_pequena_var.set(bool(tpl["fonte_pequena"]))
         self._blocos_customizados = _blocos_validos(tpl.get("blocos_customizados")) or None
         self._update_advanced_status()
+        self._ajustar_largura_campos()
+        self._refresh_preview()
+
+    @staticmethod
+    def _set_text(widget: tk.Text, valor: str) -> None:
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", valor or "")
 
     def read(self) -> dict:
-        """Não inclui header_text/footer_text — esses continuam nos campos
-        já existentes de Cabeçalho/Rodapé do formulário (DeviceDialog junta
-        tudo antes de salvar)."""
         try:
             qr_module_size = int(self.qr_module_spin.get())
         except ValueError:
@@ -147,11 +280,35 @@ class TemplateBasicFrame(ttk.LabelFrame):
         return {
             "mostrar_ie": self.mostrar_ie_var.get(),
             "cupom_titulo": self.cupom_titulo_entry.get().strip() or DEFAULT_TEMPLATE["cupom_titulo"],
-            "mensagem_empresa": self.mensagem_empresa_entry.get().strip(),
+            "header_text": self.header_text.get("1.0", "end-1c").strip(),
+            "footer_text": self.footer_text.get("1.0", "end-1c").strip(),
+            "mensagem_empresa": self.mensagem_empresa_text.get("1.0", "end-1c").strip(),
             "qr_module_size": qr_module_size,
             "qr_error_correction": self.qr_ec_combo.get() or "M",
+            "pdv_label": self.pdv_label_entry.get().strip(),
+            "fonte_pequena": self.fonte_pequena_var.get(),
             "blocos_customizados": self._blocos_customizados,
         }
+
+    def _refresh_preview(self) -> None:
+        """Reaproveita o renderer de verdade (render_danfe_nfce) num payload
+        fictício — DRY: nunca duplica a lógica de layout aqui, então a
+        pré-visualização nunca pode ficar dessincronizada do que realmente
+        vai pra impressora."""
+        template = self.read()
+        try:
+            raw = render_danfe_nfce(
+                _PREVIEW_PAYLOAD, encoding="cp860", paper_width_mm=self._get_paper_width_mm(),
+                mode="raw", cut_mode="none", template=template,
+            )
+            texto = raw.decode("cp860", errors="replace")
+        except Exception as err:  # nunca deixa a pré-visualização travar o formulário
+            texto = f"(pré-visualização indisponível: {err})"
+
+        self.preview_text.configure(state="normal")
+        self.preview_text.delete("1.0", tk.END)
+        self.preview_text.insert("1.0", texto)
+        self.preview_text.configure(state="disabled")
 
     def _update_advanced_status(self) -> None:
         if self._blocos_customizados:
@@ -176,6 +333,7 @@ class TemplateBasicFrame(ttk.LabelFrame):
             )
         self._blocos_customizados = novo
         self._update_advanced_status()
+        self._refresh_preview()
 
     def _export(self) -> None:
         path = filedialog.asksaveasfilename(

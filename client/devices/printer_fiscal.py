@@ -34,7 +34,6 @@ connector.send_fiscal_job — nunca contém nada de layout):
         "emitente": {"cnpj", "cpf", "razao_social", "ie", "endereco"},
         "consumidor": {"cpf_cnpj": "opcional"},
         "atendente": "opcional — nome de quem atendeu",
-        "pdv_label": "opcional — identificação do caixa/PDV (ex.: 'PDV 1')",
         "itens": [{"codigo", "descricao", "unidade", "quantidade", "valor_unitario", "valor_total"}],
         "totais": {"valor_produtos", "valor_descontos", "valor_total", "valor_frete", "valor_seguro", "valor_outras_despesas"},
         "pagamentos": [{"forma", "valor"}],
@@ -45,10 +44,18 @@ connector.send_fiscal_job — nunca contém nada de layout):
 
 Contrato do TEMPLATE (configurado localmente, ver DEFAULT_TEMPLATE abaixo) —
 mora em device["settings"]["template"] no config.json, nunca no payload.
+Inclui "pdv_label" (nome do caixa/PDV, ex.: "PDV 1") — de propósito NÃO vem
+do Simple ERP nem do nome do dispositivo de impressão cadastrado: é uma
+identificação própria do posto físico, configurada aqui, e some da nota
+quando vazia (ver _renderizar_atendente). "header_text"/"footer_text"/
+"mensagem_empresa" aceitam os placeholders de gui/template_editor.py
+(CAMPOS_DISPONIVEIS) e a sintaxe {"x"*N} pra repetir caractere — ver
+devices/template_text.py.
 """
 from __future__ import annotations
 
 from devices.escpos import EscPosBuilder, chars_per_line, format_brl
+from devices.template_text import renderizar as renderizar_template_texto
 
 TEXTO_HOMOLOGACAO = "EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL"
 TEXTO_CONTINGENCIA = ("EMITIDA EM CONTINGENCIA", "Pendente de autorizacao")
@@ -64,6 +71,11 @@ DEFAULT_TEMPLATE = {
     "qr_module_size": 6,
     "qr_error_correction": "M",
     "cupom_titulo": "CUPOM - SEM VALOR FISCAL",
+    # Campos adicionais (não fazem parte da venda em si) - de propósito
+    # ficam por último no editor (gui/template_editor.py), depois dos campos
+    # principais da nota.
+    "pdv_label": "",       # nome do caixa/PDV - nunca o nome do dispositivo de impressão
+    "fonte_pequena": False,  # Font B (ESC/POS) - condensada, cabe mais texto na mesma bobina
     # Modo Avançado (só cupom — ver módulo README/aviso na GUI). Lista de
     # blocos que SUBSTITUI o documento padrão inteiro quando presente.
     # IMPORTANTE: nota fiscal (tipo_documento="nfce") NUNCA lê esta chave —
@@ -96,8 +108,9 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: in
         raise ValueError("payload de impressão fiscal incompleto — falta 'chave_acesso' (tipo_documento=nfce)")
 
     tpl = {**DEFAULT_TEMPLATE, **(template or {})}
-    dims = _Dimensoes(paper_width_mm)
+    dims = _Dimensoes(paper_width_mm, tpl["fonte_pequena"])
     b = EscPosBuilder(encoding=encoding, plain=(mode == "raw"))
+    b.font(small=tpl["fonte_pequena"])
     contingencia = bool(payload.get("contingencia"))
 
     blocos = tpl.get("blocos_customizados") if is_cupom else None
@@ -115,8 +128,8 @@ class _Dimensoes:
     """Larguras de coluna derivadas da bobina — agrupadas pra não passar 3
     parâmetros soltos pra cada função de renderização."""
 
-    def __init__(self, paper_width_mm: int):
-        self.line_width = chars_per_line(paper_width_mm)
+    def __init__(self, paper_width_mm: int, fonte_pequena: bool = False):
+        self.line_width = chars_per_line(paper_width_mm, fonte_pequena)
         self.value_col = 10  # cabe "-9999999.99" folgado, mesma coluna nos dois tamanhos de bobina
         self.left_col = self.line_width - self.value_col
 
@@ -125,14 +138,16 @@ def _renderizar_documento_padrao(b: EscPosBuilder, payload: dict, tpl: dict, is_
                                   contingencia: bool, dims: "_Dimensoes") -> None:
     """Fluxo fixo — usado sempre pra nota fiscal, e pro cupom quando o Modo
     Avançado não tiver definido blocos_customizados (Modo Básico)."""
+    contexto = _contexto_template(payload, tpl)
+
     if tpl["header_text"]:
         b.align("center")
-        for line in tpl["header_text"].splitlines():
+        for line in renderizar_template_texto(tpl["header_text"], contexto, dims.line_width):
             b.line(line)
         b.separator("-", dims.line_width)
 
     _renderizar_cabecalho(b, payload, tpl, is_cupom, contingencia, dims.line_width)
-    _renderizar_atendente(b, payload, dims.line_width)
+    _renderizar_atendente(b, payload, tpl, dims.line_width)
     _renderizar_itens(b, payload, dims)
     _renderizar_totais(b, payload, dims)
     _renderizar_pagamentos(b, payload, dims)
@@ -144,12 +159,12 @@ def _renderizar_documento_padrao(b: EscPosBuilder, payload: dict, tpl: dict, is_
         _renderizar_divisao_fiscal(b, payload, dims, contingencia, tpl)
 
     _renderizar_mensagem_fisco(b, payload, dims.line_width)
-    _renderizar_mensagem_empresa(b, payload, tpl, dims.line_width)
+    _renderizar_mensagem_empresa(b, payload, tpl, contexto, dims.line_width)
 
     if tpl["footer_text"]:
         b.separator("-", dims.line_width)
         b.align("center")
-        for line in tpl["footer_text"].splitlines():
+        for line in renderizar_template_texto(tpl["footer_text"], contexto, dims.line_width):
             b.line(line)
 
 
@@ -165,7 +180,7 @@ def _renderizar_bloco(b: EscPosBuilder, bloco: dict, payload: dict, tpl: dict,
     if tipo == "cabecalho":
         _renderizar_cabecalho(b, payload, tpl, is_cupom, contingencia, dims.line_width)
     elif tipo == "atendente":
-        _renderizar_atendente(b, payload, dims.line_width)
+        _renderizar_atendente(b, payload, tpl, dims.line_width)
     elif tipo == "itens":
         _renderizar_itens(b, payload, dims)
     elif tipo == "totais":
@@ -177,12 +192,13 @@ def _renderizar_bloco(b: EscPosBuilder, bloco: dict, payload: dict, tpl: dict,
     elif tipo == "mensagem_fisco":
         _renderizar_mensagem_fisco(b, payload, dims.line_width)
     elif tipo == "mensagem_empresa":
-        _renderizar_mensagem_empresa(b, payload, tpl, dims.line_width)
+        _renderizar_mensagem_empresa(b, payload, tpl, _contexto_template(payload, tpl), dims.line_width)
     elif tipo == "texto":
         b.align(bloco.get("alinhamento", "left"))
         if bloco.get("negrito"):
             b.bold(True)
-        for linha in str(bloco.get("texto", "")).splitlines():
+        contexto = _contexto_template(payload, tpl)
+        for linha in renderizar_template_texto(str(bloco.get("texto", "")), contexto, dims.line_width):
             b.line(linha)
         if bloco.get("negrito"):
             b.bold(False)
@@ -195,12 +211,21 @@ def _renderizar_bloco(b: EscPosBuilder, bloco: dict, payload: dict, tpl: dict,
 def _renderizar_cabecalho(b: EscPosBuilder, payload: dict, tpl: dict, is_cupom: bool,
                            contingencia: bool, line_width: int) -> None:
     emitente = payload["emitente"]
-    b.align("center").bold(True).line(emitente.get("razao_social", "")).bold(False)
-    documento = f"CNPJ: {emitente['cnpj']}" if emitente.get("cnpj") else f"CPF: {emitente.get('cpf', '')}"
+    if emitente.get("razao_social"):
+        b.align("center").bold(True).line(emitente["razao_social"]).bold(False)
+
+    # Cada campo só ocupa linha quando tem valor de verdade - nada de linha
+    # em branco (nem texto tipo "Ausente") pra CNPJ/CPF/IE/endereço vazio,
+    # senão o cabeçalho fica maior à toa numa bobina que já é estreita.
+    documento = f"CNPJ: {emitente['cnpj']}" if emitente.get("cnpj") else (
+        f"CPF: {emitente['cpf']}" if emitente.get("cpf") else ""
+    )
     if tpl["mostrar_ie"] and emitente.get("ie"):
-        documento += f"  IE: {emitente['ie']}"
-    b.line(documento)
-    b.line(emitente.get("endereco", ""))
+        documento = f"{documento}  IE: {emitente['ie']}" if documento else f"IE: {emitente['ie']}"
+    if documento:
+        b.line(documento)
+    if emitente.get("endereco"):
+        b.line(emitente["endereco"])
     if contingencia:
         _linhas_contingencia(b)
     b.separator("=", line_width)
@@ -214,22 +239,32 @@ def _renderizar_cabecalho(b: EscPosBuilder, payload: dict, tpl: dict, is_cupom: 
     b.separator("-", line_width)
 
 
-def _renderizar_atendente(b: EscPosBuilder, payload: dict, line_width: int) -> None:
-    if not (payload.get("atendente") or payload.get("pdv_label")):
+def _renderizar_atendente(b: EscPosBuilder, payload: dict, tpl: dict, line_width: int) -> None:
+    # pdv_label vem do TEMPLATE (configurado aqui no Controller Machine) —
+    # nunca do payload do Simple ERP nem do nome do dispositivo de impressão
+    # cadastrado. Some da nota quando vazio (ver DEFAULT_TEMPLATE).
+    pdv_label = tpl.get("pdv_label") or ""
+    if not (payload.get("atendente") or pdv_label):
         return
     b.align("left")
     if payload.get("atendente"):
         b.line(f"Atendente: {payload['atendente']}")
-    if payload.get("pdv_label"):
-        b.line(f"Caixa: {payload['pdv_label']}")
+    if pdv_label:
+        b.line(f"Caixa: {pdv_label}")
     b.separator("-", line_width)
 
 
 def _renderizar_itens(b: EscPosBuilder, payload: dict, dims: "_Dimensoes") -> None:
+    """Cada item vira 2 linhas — código de barras + nome (quebrado por
+    palavra) na primeira, quantidade x valor unitário à esquerda e valor
+    total à direita na segunda. Uma "tabela" de 5 colunas de verdade (tudo
+    numa linha só) não cabe legível nas larguras de bobina suportadas (32 a
+    64 colunas, ver escpos.CHARS_PER_LINE*) — esse layout em 2 linhas é o
+    padrão de mercado pra cupom térmico exatamente por isso."""
     b.align("left")
     for item in payload.get("itens", []):
         codigo = item.get("codigo", "")
-        descricao = f"{codigo} {item['descricao']}".strip()
+        descricao = f"{codigo}  {item['descricao']}".strip()
         for linha in _quebrar_por_palavra(descricao, dims.line_width):
             b.line(linha)
         qtd = item["quantidade"]
@@ -301,11 +336,38 @@ def _renderizar_mensagem_fisco(b: EscPosBuilder, payload: dict, line_width: int)
         b.align("left").line(mensagem)
 
 
-def _renderizar_mensagem_empresa(b: EscPosBuilder, payload: dict, tpl: dict, line_width: int) -> None:
+def _renderizar_mensagem_empresa(b: EscPosBuilder, payload: dict, tpl: dict, contexto: dict, line_width: int) -> None:
     mensagem = payload.get("mensagem_empresa") or payload.get("mensagem_adicional") or tpl.get("mensagem_empresa")
     if mensagem:
         b.separator("-", line_width)
-        b.align("left").line(mensagem)
+        b.align("left")
+        for linha in renderizar_template_texto(mensagem, contexto, line_width):
+            b.line(linha)
+
+
+def _contexto_template(payload: dict, tpl: dict) -> dict:
+    """Placeholders disponíveis pros campos de texto livre (cabeçalho,
+    rodapé, mensagem da empresa) — ver devices/template_text.py e
+    gui/template_editor.py::CAMPOS_DISPONIVEIS (mesma lista, mantida em
+    sincronia manualmente: um é o motor, o outro é a documentação/UI)."""
+    emitente = payload.get("emitente") or {}
+    totais = payload.get("totais") or {}
+    return {
+        "razao_social": emitente.get("razao_social", ""),
+        "cnpj": emitente.get("cnpj", ""),
+        "cpf": emitente.get("cpf", ""),
+        "ie": emitente.get("ie", ""),
+        "endereco": emitente.get("endereco", ""),
+        "atendente": payload.get("atendente", ""),
+        "pdv_label": tpl.get("pdv_label") or "",
+        "numero": payload.get("numero", ""),
+        "serie": payload.get("serie", ""),
+        "data_emissao": payload.get("data_emissao", ""),
+        "chave_acesso": payload.get("chave_acesso", ""),
+        "protocolo_autorizacao": payload.get("protocolo_autorizacao", ""),
+        "valor_total": format_brl(totais.get("valor_total", 0)),
+        "valor_produtos": format_brl(totais.get("valor_produtos", 0)),
+    }
 
 
 def _linha_consumidor(consumidor: dict) -> str:

@@ -1,25 +1,43 @@
 """
 Builder mínimo de comandos ESC/POS — só o subconjunto padrão (init, texto,
-alinhamento, negrito, corte) que praticamente toda impressora térmica de
-cupom entende, independente de marca. Não é um driver completo: não cobre
+alinhamento, negrito, fonte, corte) que praticamente toda impressora térmica
+de cupom entende, independente de marca. Não é um driver completo: não cobre
 código de barras, imagem ou comandos proprietários de fabricante — se
 precisar disso no futuro, é aqui que entra.
 """
 from __future__ import annotations
 
-# Colunas de texto por linha, Font A (fonte padrão) — varia com a largura
-# física da bobina. Números redondos usuais de mercado; se um equipamento
+import unicodedata
+
+# Colunas de texto por linha — varia com a largura física da bobina E com a
+# fonte selecionada (Font B é mais estreita/condensada, cabe mais caractere
+# na mesma bobina). Números redondos usuais de mercado; se um equipamento
 # específico imprimir com fonte diferente, ajustar aqui.
 CHARS_PER_LINE = {58: 32, 80: 48}
+CHARS_PER_LINE_FONT_B = {58: 42, 80: 64}
 
 
-def chars_per_line(paper_width_mm: int) -> int:
+def chars_per_line(paper_width_mm: int, fonte_pequena: bool = False) -> int:
+    tabela = CHARS_PER_LINE_FONT_B if fonte_pequena else CHARS_PER_LINE
     try:
-        return CHARS_PER_LINE[paper_width_mm]
+        return tabela[paper_width_mm]
     except KeyError:
         raise ValueError(
             f"largura de papel não suportada: {paper_width_mm}mm (use {sorted(CHARS_PER_LINE)})"
         )
+
+
+def to_ascii(value: str) -> str:
+    """Transliteração pra ASCII puro (7 bits) — impressora térmica genérica
+    nem sempre tem o codepage certo selecionado pro acento aparecer certo
+    (varia por marca/firmware, e nem toda impressora aceita o comando de
+    trocar codepage) - resultado sem isso é lixo no lugar de "ç"/"ã"/"é" etc.
+    ASCII puro é idêntico em QUALQUER codepage, então normalizar aqui elimina
+    o problema de vez, sem precisar acertar o codepage de cada equipamento.
+    NFKD decompõe o acento da letra (ex.: "ç" -> "c" + cedilha combinante) e
+    o encode/decode ascii descarta a parte que sobra."""
+    normalizado = unicodedata.normalize("NFKD", value)
+    return normalizado.encode("ascii", "ignore").decode("ascii")
 
 
 ESC = b"\x1b"
@@ -31,6 +49,8 @@ ALIGN_CENTER = ESC + b"a" + b"\x01"
 ALIGN_RIGHT = ESC + b"a" + b"\x02"
 BOLD_ON = ESC + b"E" + b"\x01"
 BOLD_OFF = ESC + b"E" + b"\x00"
+FONT_A = ESC + b"M" + b"\x00"  # fonte padrao (maior)
+FONT_B = ESC + b"M" + b"\x01"  # fonte condensada (menor, mais estreita)
 CUT_FULL = GS + b"V" + b"\x00"
 CUT_PARTIAL = GS + b"V" + b"\x01"
 LINE_FEED = b"\n"
@@ -63,7 +83,12 @@ class EscPosBuilder:
         self._buffer = bytearray(INIT)
 
     def text(self, value: str) -> "EscPosBuilder":
-        self._buffer += value.encode(self.encoding, errors="replace")
+        # Sempre transliterado pra ASCII antes de encodar - ver to_ascii(),
+        # elimina acento virando lixo sem depender do codepage certo estar
+        # selecionado na impressora. errors="replace" aqui é só rede de
+        # segurança pro raro caractere que sobrar fora do ASCII (símbolo,
+        # emoji etc.) - nunca deveria disparar em texto de nota fiscal normal.
+        self._buffer += to_ascii(value).encode(self.encoding, errors="replace")
         return self
 
     def line(self, value: str = "") -> "EscPosBuilder":
@@ -81,6 +106,16 @@ class EscPosBuilder:
         if self.plain:
             return self
         self._buffer += BOLD_ON if on else BOLD_OFF
+        return self
+
+    def font(self, small: bool) -> "EscPosBuilder":
+        """Font B (menor/condensada) em vez da Font A padrão - pedido pra
+        caber mais informação na mesma bobina. Chamar uma vez logo no início
+        do documento (ver render_danfe_nfce) - a impressora mantém a fonte
+        selecionada até o próximo ESC M ou até desligar."""
+        if self.plain:
+            return self
+        self._buffer += FONT_B if small else FONT_A
         return self
 
     def separator(self, char: str = "-", width: int = 42) -> "EscPosBuilder":
