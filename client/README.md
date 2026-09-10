@@ -78,7 +78,33 @@ renomeado ou realocado do lado do Simple ERP.
 Ficam em `logs/` ao lado de onde o programa está rodando (dentro da pasta
 de instalação, ver `installer/` abaixo). Um arquivo por dia
 (`controller-machine.log`, rotacionado à meia-noite), no máximo 25 arquivos
-guardados — os mais antigos somem sozinhos (`logging_setup.py`).
+guardados — os mais antigos somem sozinhos (`logging_setup.py`). Cada job
+rastreado (`main.py::JOBS_RASTREADOS`) grava uma linha legível com
+data/hora (`%(asctime)s` do próprio `logging`) e uma descrição — "Impressão
+de documento fiscal NFC-e — Impressora Caixa 1", "Comunicação com a
+balança — Balança Frios", etc. — tanto no arquivo quanto na aba "Log" da
+janela (Windows).
+
+## Histórico de jobs (banco de dados local)
+
+`print_history.py` grava cada job rastreado — impressão comum, fiscal/cupom
+e comunicação com balança — num SQLite local (`print_history.db`, mesma
+pasta dos `logs/`), com data/hora, dispositivo, tipo, sucesso/falha e
+mensagem de erro quando falhou (nunca o conteúdo impresso em si). A aba
+"Histórico" na janela (Windows) lê esse banco direto — não precisa abrir o
+arquivo `.db` na mão pra consultar o que já rodou; `print_history.listar()`
+também dá pra chamar direto em Python se precisar de outra visualização.
+
+## Impressora comum e "Microsoft Print to PDF"
+
+`discover_os_printers()` lista qualquer fila instalada no Windows/CUPS,
+inclusive driver virtual ("Microsoft Print to PDF", "Microsoft XPS Document
+Writer") — a API de enumeração não distingue isso de impressora física.
+Funciona pra job já em PDF, mas esses drivers sempre abrem a caixa "Salvar
+como": sem ninguém pra clicar, o job trava esperando. Pra automação de
+verdade (sem diálogo), tanto impressora comum quanto fiscal aceitam
+`connection.kind = "pdf_folder"` — salva o PDF direto numa pasta escolhida,
+sem interação nenhuma (ver `main.py::_salvar_pdf_em_pasta`).
 
 ## Modelo de impressão (DANFE NFC-e / Cupom)
 

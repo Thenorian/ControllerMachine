@@ -28,7 +28,7 @@ TYPE_LABELS = {
 TYPE_BY_LABEL = {v: k for k, v in TYPE_LABELS.items()}
 
 CONNECTION_KINDS = {
-    "printer_common": ["os_printer", "tcp"],
+    "printer_common": ["os_printer", "tcp", "pdf_folder"],
     "printer_fiscal": ["os_printer", "tcp", "pdf_folder"],
     "scale": ["tcp", "file", "serial"],
 }
@@ -79,6 +79,21 @@ SCALE_BRAND_BY_LABEL = {v: k for k, v in SCALE_BRAND_LABELS.items()}
 KINDS_WITH_PRINT_SETTINGS = {"os_printer", "tcp"}
 
 BAUD_RATES = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"]
+
+# Rótulos amigáveis pra aba "Histórico" (ver print_history.py) — tipo_job é
+# o "kind" cru do job (main.py::JOBS_RASTREADOS), tipo_documento só existe
+# pro job fiscal ("nfce"/"cupom"/"caixa", ver main.py::_job_tipo_documento).
+TIPO_JOB_LABELS = {
+    "print": "Impressão comum",
+    "print_fiscal_nfce": "Fiscal / Cupom",
+    "scale_update": "Balança",
+}
+_DOCUMENTO_LABELS = {
+    "nfce": "NFC-e",
+    "cupom": "Cupom",
+    "caixa": "Cupom de caixa",
+    None: "-",
+}
 
 
 def _png_bytes(pil_image) -> bytes:
@@ -244,11 +259,11 @@ class ControllerWindow(tk.Tk):
     def _build_history_tab(self, parent: ttk.Frame) -> None:
         parent.configure(padding=10)
 
-        columns = ("quando", "dispositivo", "documento", "status", "mensagem")
+        columns = ("quando", "dispositivo", "tipo", "documento", "status", "mensagem")
         self.history_tree = ttk.Treeview(parent, columns=columns, show="headings", height=12)
-        headings = {"quando": "Quando", "dispositivo": "Dispositivo", "documento": "Documento",
-                    "status": "Status", "mensagem": "Mensagem"}
-        widths = {"quando": 130, "dispositivo": 110, "documento": 70, "status": 55, "mensagem": 200}
+        headings = {"quando": "Quando", "dispositivo": "Dispositivo", "tipo": "Tipo",
+                    "documento": "Documento", "status": "Status", "mensagem": "Mensagem"}
+        widths = {"quando": 130, "dispositivo": 100, "tipo": 110, "documento": 70, "status": 55, "mensagem": 180}
         for col in columns:
             self.history_tree.heading(col, text=headings[col])
             self.history_tree.column(col, width=widths[col])
@@ -261,10 +276,11 @@ class ControllerWindow(tk.Tk):
         self.history_tree.delete(*self.history_tree.get_children())
         for row in print_history.listar(limite=200):
             quando = datetime.fromtimestamp(row["timestamp"]).strftime("%d/%m/%Y %H:%M:%S")
-            documento = row["tipo_documento"] or "-"
+            tipo = TIPO_JOB_LABELS.get(row["tipo_job"], row["tipo_job"])
+            documento = _DOCUMENTO_LABELS.get(row["tipo_documento"], row["tipo_documento"] or "-")
             status = "OK" if row["sucesso"] else "Falhou"
             self.history_tree.insert("", "end", values=(
-                quando, row["device_label"], documento, status, row["mensagem"] or "",
+                quando, row["device_label"], tipo, documento, status, row["mensagem"] or "",
             ))
 
     def _poll_history(self) -> None:
@@ -414,8 +430,35 @@ class DeviceDialog(tk.Toplevel):
         self.title("Editar dispositivo" if self.editing else "Adicionar dispositivo")
         self.resizable(False, False)
 
-        body = ttk.Frame(self, padding=10)
-        body.pack(fill="both", expand=True)
+        # Salvar/Cancelar ficam fixos fora da área de rolagem — em telas
+        # pequenas (ou com Tipo/Conexão que mostra muito campo, ex.: fiscal +
+        # impressora instalada no SO) o conteúdo passa a rolar em vez de
+        # empurrar esses botões pra fora da área visível da tela.
+        buttons = ttk.Frame(self, padding=(10, 8))
+        buttons.pack(side="bottom", fill="x")
+        ttk.Button(buttons, text="Salvar" if self.editing else "Adicionar", command=self._confirm).pack(side="left")
+        ttk.Button(buttons, text="Cancelar", command=self.destroy).pack(side="left", padx=(6, 0))
+
+        scroll_area = ttk.Frame(self)
+        scroll_area.pack(side="top", fill="both", expand=True)
+        canvas = tk.Canvas(scroll_area, borderwidth=0, highlightthickness=0)
+        vscroll = ttk.Scrollbar(scroll_area, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vscroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vscroll.pack(side="right", fill="y")
+
+        body = ttk.Frame(canvas, padding=10)
+        body_id = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(body_id, width=e.width))
+
+        def _on_mousewheel(event) -> None:
+            delta = -1 if getattr(event, "num", None) == 5 or event.delta < 0 else 1
+            canvas.yview_scroll(-delta, "units")
+
+        canvas.bind("<MouseWheel>", _on_mousewheel)  # Windows
+        canvas.bind("<Button-4>", _on_mousewheel)    # Linux (scroll up)
+        canvas.bind("<Button-5>", _on_mousewheel)    # Linux (scroll down)
 
         row = 0
         ttk.Label(body, text="Nome:").grid(row=row, column=0, sticky="w", pady=2)
@@ -468,13 +511,17 @@ class DeviceDialog(tk.Toplevel):
 
         self._build_kind_frames()
 
-        buttons = ttk.Frame(body)
-        buttons.grid(row=row, column=0, columnspan=3, pady=(12, 0))
-        ttk.Button(buttons, text="Salvar" if self.editing else "Adicionar", command=self._confirm).pack(side="left")
-        ttk.Button(buttons, text="Cancelar", command=self.destroy).pack(side="left", padx=(6, 0))
-
         self._load(device)
         self.transient(parent)
+
+        # Tamanho fixo (mesmo padrão do resto da GUI), mas nunca maior que a
+        # tela — acima disso o conteúdo rola em vez de crescer a janela pra
+        # fora da área visível.
+        self.update_idletasks()
+        largura = body.winfo_reqwidth() + vscroll.winfo_reqwidth() + 4
+        altura_max_conteudo = self.winfo_screenheight() - buttons.winfo_reqheight() - 100
+        altura_conteudo = min(body.winfo_reqheight(), altura_max_conteudo)
+        self.geometry(f"{largura}x{altura_conteudo + buttons.winfo_reqheight()}")
         _make_dialog_visible(self)
 
     # ---- sub-formulários por kind de conexão ----
