@@ -1,7 +1,8 @@
 """
 Modelagem orientada a objetos do modelo de impressão (layout do DANFE
-NFC-e / NFe / Cupom) — pra usar do lado do Simple ERP, junto com
-server.Server (ver server.py). Isto é só um jeito mais confortável de
+NFC-e / NFe / Cupom) — pra usar do lado de quem embutir o `server/`
+(Simple ERP ou qualquer outro sistema), junto com server.Server (ver
+server.py). Isto é só um jeito mais confortável de
 MONTAR o dict que Server.push_template()/ControllerConnector.send_template_update()
 manda pela rede: o contrato que chega no Controller Machine continua sendo
 o dict simples descrito em client/devices/printer_fiscal.py (DEFAULT_TEMPLATE)
@@ -27,8 +28,8 @@ Duas formas de personalizar o layout:
 
 Em qualquer um dos dois casos, quem propaga a mudança pros controllers é
 sempre `Server.push_template(...)` — nunca edição dispositivo por
-dispositivo no Controller Machine (esse editor foi removido de propósito,
-ver client/gui/template_editor.py).
+dispositivo no Controller Machine (não existe editor de layout do lado do
+client, de propósito).
 """
 from __future__ import annotations
 
