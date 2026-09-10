@@ -18,7 +18,6 @@ from catalog import DeviceCatalog
 from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
 from gui.folder_prompt import FolderPromptService
-from gui.template_editor import TemplateBasicFrame
 from transport import ControllerTransport
 
 TYPE_LABELS = {
@@ -467,16 +466,6 @@ class DeviceDialog(tk.Toplevel):
 
         row += 1
 
-        # Cabeçalho/Rodapé viraram campos de texto dentro do próprio
-        # TemplateBasicFrame (aceitam placeholder/repetição e têm
-        # pré-visualização) — não ficam mais soltos aqui.
-        self.template_frame = TemplateBasicFrame(body, get_paper_width_mm=self._paper_width_mm)
-        self.template_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
-        row += 1
-        # Bind depois de criar o template_frame — troca de bobina precisa
-        # recalcular a largura dos campos de texto e a pré-visualização.
-        self.paper_combo.bind("<<ComboboxSelected>>", lambda _e: self.template_frame.on_paper_changed())
-
         self._build_kind_frames()
 
         buttons = ttk.Frame(body)
@@ -487,16 +476,6 @@ class DeviceDialog(tk.Toplevel):
         self._load(device)
         self.transient(parent)
         _make_dialog_visible(self)
-
-    def _paper_width_mm(self) -> int:
-        """Largura de bobina (mm) atual do formulário — usada pelo
-        TemplateBasicFrame só pra dimensionar campos/pré-visualização;
-        default 80 se o combo ainda não tiver valor válido (ex.: no
-        instante em que o próprio TemplateBasicFrame está sendo montado)."""
-        try:
-            return int(self.paper_combo.get().replace("mm", ""))
-        except (TypeError, ValueError):
-            return 80
 
     # ---- sub-formulários por kind de conexão ----
 
@@ -587,10 +566,8 @@ class DeviceDialog(tk.Toplevel):
         show_settings = type_ == "printer_fiscal" and kind in KINDS_WITH_PRINT_SETTINGS
         if show_settings:
             self.settings_frame.grid()
-            self.template_frame.grid()
         else:
             self.settings_frame.grid_remove()
-            self.template_frame.grid_remove()
 
     def _browse_file_path(self) -> None:
         path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação")
@@ -617,7 +594,7 @@ class DeviceDialog(tk.Toplevel):
         self.encoding_combo.set(ENCODING_LABELS["cp860"])
         self.cut_combo.set(CUT_LABELS["full"])
         self.baud_combo.set("9600")
-        self.template_frame.load({})
+        self._device = device
 
         if device is None:
             self.type_combo.current(0)
@@ -643,14 +620,6 @@ class DeviceDialog(tk.Toplevel):
             self.encoding_combo.set(ENCODING_LABELS.get(settings["encoding"], settings["encoding"]))
         if settings.get("cut_mode"):
             self.cut_combo.set(CUT_LABELS.get(settings["cut_mode"], settings["cut_mode"]))
-        template = dict(settings.get("template") or {})
-        # Compat: header_text/footer_text viviam soltos em settings antes do
-        # editor de modelo existir (ver main.py::_dispatch_fiscal, mesma regra).
-        if not template.get("header_text") and settings.get("header_text"):
-            template["header_text"] = settings["header_text"]
-        if not template.get("footer_text") and settings.get("footer_text"):
-            template["footer_text"] = settings["footer_text"]
-        self.template_frame.load(template)
 
         kind = connection.get("kind")
         if kind == "os_printer":
@@ -695,7 +664,12 @@ class DeviceDialog(tk.Toplevel):
             settings["encoding"] = ENCODING_BY_LABEL.get(self.encoding_combo.get(), "cp860")
             settings["cut_mode"] = CUT_BY_LABEL.get(self.cut_combo.get(), "full")
 
-            settings["template"] = self.template_frame.read()
+            # Layout (template) nunca é editado aqui — só chega por push de
+            # quem embutiu o Server. Preserva o que já estava, se houver,
+            # em vez de apagar.
+            existing_template = ((self._device or {}).get("settings") or {}).get("template")
+            if existing_template:
+                settings["template"] = existing_template
 
         brand = self.brand_combo.get().strip() or "generic"
         if type_ == "scale":

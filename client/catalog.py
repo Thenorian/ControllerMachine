@@ -132,6 +132,19 @@ class DeviceCatalog:
         self._config["company_name"] = company_name
         self._save()
 
+    def set_device_template(self, device_id: str, template: dict) -> None:
+        """Aplica um modelo de impressão recebido do Simple ERP via push
+        (job `set_template`, ver main.py::_dispatch_set_template) — nunca
+        chamado a partir de edição local. O Controller Machine não decide
+        layout por conta própria, só guarda o que recebeu por último."""
+        device = self.get_device(device_id)
+        if device is None:
+            raise KeyError(device_id)
+        settings = dict(device.get("settings") or {})
+        settings["template"] = template
+        device["settings"] = settings
+        self._save()
+
     # ------------------------------------------------------------------ #
 
     def to_announce_payload(self) -> dict[str, dict]:

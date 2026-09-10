@@ -29,6 +29,7 @@ Uso típico dentro do Simple ERP:
     connector.is_online(controller_id)
     connector.send_print_job(controller_id, device_id, "raw", base64_bytes)
     connector.send_scale_update(controller_id, device_id, produtos)
+    connector.send_template_update(controller_id, device_id, template_dict)
 
     # ao encerrar o Simple ERP:
     connector.stop()
@@ -160,6 +161,21 @@ class ControllerConnector:
             "kind": "scale_update",
             "device_id": device_id,
             "products": products,
+        }, timeout)
+
+    def send_template_update(self, controller_id: str, device_id: str, template: dict, timeout: float = 10) -> dict:
+        """Empurra o modelo de impressão (layout do DANFE/cupom, ver contrato
+        do TEMPLATE em client/devices/printer_fiscal.py) pro Controller
+        Machine. Fonte de verdade do layout é sempre o Simple ERP — o
+        Controller Machine só recebe, guarda em cache local (pra continuar
+        funcionando se cair a conexão) e aplica no próximo `send_fiscal_job`.
+        Quando uma regra fiscal ou o layout muda, é isso que se chama pra
+        cada controller da empresa — não precisa (nem deve) ter edição de
+        layout feita loja por loja no Controller Machine."""
+        return self._send_job(controller_id, {
+            "kind": "set_template",
+            "device_id": device_id,
+            "template": template,
         }, timeout)
 
     def _send_job(self, controller_id: str, job_body: dict, timeout: float) -> dict:

@@ -3,11 +3,17 @@ Renderização do DANFE-NFCe e do Cupom não fiscal (o comprovante impresso
 depois que a venda foi concluída — DANFE só depois que a nota já foi
 autorizada pela SEFAZ). Este módulo NÃO emite nem assina nota — isso é
 responsabilidade do Simple ERP (ou de um provedor tipo Focus NFe). O Simple
-ERP só manda DADOS da venda (payload abaixo) — quem decide COMO o documento
-aparece (cabeçalho extra, mensagem padrão, tamanho do QR, e no cupom até a
-ordem/composição do documento) é sempre o `template`, configurado localmente
-aqui no Controller Machine (ver gui/template_editor.py) e nunca pelo Simple
-ERP — layout é responsabilidade exclusiva deste projeto.
+ERP (ou quem tiver embutido o `server/`) manda DADOS da venda (payload
+abaixo) num canal, e o LAYOUT (cabeçalho extra, mensagem padrão, tamanho
+do QR, e no cupom até a ordem/composição do documento) — o `template` —
+em outro: o Controller Machine nunca decide layout por conta própria, só
+aplica o que foi empurrado por último (job `set_template`, ver
+server/connector.py::send_template_update e
+main.py::_dispatch_set_template/catalog.py::set_device_template). O
+`template` fica cacheado em device["settings"]["template"] no config.json
+local só pra continuar imprimindo se a conexão cair — não é editado à mão
+aqui, e mudar uma regra fiscal ou o leiaute é um push pra cada controller
+da empresa, nunca ida loja por loja.
 
 Leiaute padrão segue a especificação em Recursos/Documentação/Interna/
 Simple ERP/NFCe.md (Obsidian) — Divisões I a IX do Manual de Especificações
@@ -42,15 +48,15 @@ connector.send_fiscal_job — nunca contém nada de layout):
         "mensagem_empresa": "opcional — infCpl / recado do lojista (Divisão IX) desta venda específica",
     }
 
-Contrato do TEMPLATE (configurado localmente, ver DEFAULT_TEMPLATE abaixo) —
-mora em device["settings"]["template"] no config.json, nunca no payload.
-Inclui "pdv_label" (nome do caixa/PDV, ex.: "PDV 1") — de propósito NÃO vem
-do Simple ERP nem do nome do dispositivo de impressão cadastrado: é uma
-identificação própria do posto físico, configurada aqui, e some da nota
-quando vazia (ver _renderizar_atendente). "header_text"/"footer_text"/
-"mensagem_empresa" aceitam os placeholders de gui/template_editor.py
-(CAMPOS_DISPONIVEIS) e a sintaxe {"x"*N} pra repetir caractere — ver
-devices/template_text.py.
+Contrato do TEMPLATE (ver DEFAULT_TEMPLATE abaixo) — recebido por push
+(`set_template`), cacheado em device["settings"]["template"] no
+config.json, nunca no payload. Inclui "pdv_label" (nome do caixa/PDV, ex.:
+"PDV 1") — de propósito NÃO vem do payload da venda nem do nome do
+dispositivo de impressão cadastrado: é uma identificação própria do posto
+físico, e some da nota quando vazia (ver _renderizar_atendente).
+"header_text"/"footer_text"/"mensagem_empresa" aceitam os placeholders
+listados em `_contexto_template` (abaixo) e a sintaxe {"x"*N} pra repetir
+caractere — ver devices/template_text.py.
 """
 from __future__ import annotations
 
@@ -60,9 +66,9 @@ from devices.template_text import renderizar as renderizar_template_texto
 TEXTO_HOMOLOGACAO = "EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL"
 TEXTO_CONTINGENCIA = ("EMITIDA EM CONTINGENCIA", "Pendente de autorizacao")
 
-# Modo Básico do editor de modelo mexe só nestas chaves. Qualquer uma que
-# faltar usa o valor abaixo — dispositivo configurado antes do editor
-# existir continua imprimindo exatamente igual.
+# Chaves que o template pode trazer. Qualquer uma que faltar usa o valor
+# abaixo — controller que ainda não recebeu nenhum push continua imprimindo
+# o padrão de fábrica.
 DEFAULT_TEMPLATE = {
     "header_text": "",
     "footer_text": "",
@@ -71,22 +77,19 @@ DEFAULT_TEMPLATE = {
     "qr_module_size": 6,
     "qr_error_correction": "M",
     "cupom_titulo": "CUPOM - SEM VALOR FISCAL",
-    # Campos adicionais (não fazem parte da venda em si) - de propósito
-    # ficam por último no editor (gui/template_editor.py), depois dos campos
-    # principais da nota.
     "pdv_label": "",       # nome do caixa/PDV - nunca o nome do dispositivo de impressão
     "fonte_pequena": False,  # Font B (ESC/POS) - condensada, cabe mais texto na mesma bobina
-    # Modo Avançado (só cupom — ver módulo README/aviso na GUI). Lista de
-    # blocos que SUBSTITUI o documento padrão inteiro quando presente.
-    # IMPORTANTE: nota fiscal (tipo_documento="nfce") NUNCA lê esta chave —
-    # a trava não é validação, é estrutural (ver render_danfe_nfce abaixo),
-    # não tem como um template mal configurado tirar QR/chave/protocolo/
-    # consumidor de uma NFC-e, mesmo editando o config.json na mão.
+    # Modo Avançado (só cupom). Lista de blocos que SUBSTITUI o documento
+    # padrão inteiro quando presente. IMPORTANTE: nota fiscal
+    # (tipo_documento="nfce") NUNCA lê esta chave — a trava não é validação,
+    # é estrutural (ver render_danfe_nfce abaixo), não tem como um template
+    # mal configurado (nem um push malformado) tirar QR/chave/protocolo/
+    # consumidor de uma NFC-e.
     "blocos_customizados": None,
 }
 
-# Vocabulário de blocos do editor avançado — de propósito NÃO existe bloco
-# de QR Code, chave de acesso, protocolo, número ou série: essas peças são
+# Vocabulário de blocos do Modo Avançado — de propósito NÃO existe bloco de
+# QR Code, chave de acesso, protocolo, número ou série: essas peças são
 # exclusivas do fluxo fiscal fixo, nem aparecem como opção pra montar um
 # cupom customizado.
 TIPOS_BLOCO_VALIDOS = {
@@ -347,9 +350,9 @@ def _renderizar_mensagem_empresa(b: EscPosBuilder, payload: dict, tpl: dict, con
 
 def _contexto_template(payload: dict, tpl: dict) -> dict:
     """Placeholders disponíveis pros campos de texto livre (cabeçalho,
-    rodapé, mensagem da empresa) — ver devices/template_text.py e
-    gui/template_editor.py::CAMPOS_DISPONIVEIS (mesma lista, mantida em
-    sincronia manualmente: um é o motor, o outro é a documentação/UI)."""
+    rodapé, mensagem da empresa) via {{campo}} — ver devices/template_text.py
+    (motor). Lista de chaves abaixo é a documentação de quem for montar o
+    template do lado de fora (ver server/templates.py::Text)."""
     emitente = payload.get("emitente") or {}
     totais = payload.get("totais") or {}
     return {

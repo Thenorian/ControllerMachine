@@ -2,10 +2,10 @@
 Motor de template mínimo pros campos de texto livre do modelo de impressão
 (cabeçalho, rodapé, mensagem da empresa) — suporta:
 
-  {{campo}}        -> substitui pelo valor do campo (ver CAMPOS_DISPONIVEIS
-                       em gui/template_editor.py) — campo desconhecido ou
-                       vazio vira "" (nunca quebra a impressão por um nome
-                       errado/typo no template).
+  {{campo}}        -> substitui pelo valor do campo (lista de campos
+                       disponíveis em devices/printer_fiscal.py::_contexto_template)
+                       — campo desconhecido ou vazio vira "" (nunca quebra a
+                       impressão por um nome errado/typo no template).
   {"x"*8} {'x'*8}  -> repete o caractere/trecho "x" 8 vezes (mesmo efeito de
                        uma linha de traços, ex.: {"-"*20}). De propósito NÃO
                        é eval() de Python de verdade — só entende essa forma

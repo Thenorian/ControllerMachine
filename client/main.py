@@ -46,6 +46,8 @@ def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
             _dispatch_fiscal(device, job, ask_folder)
         elif kind == "scale_update":
             _dispatch_scale(device, job)
+        elif kind == "set_template":
+            catalog.set_device_template(device["device_id"], job.get("template") or {})
         else:
             return {"status": "error", "message": f"kind desconhecido: {kind}"}
     except Exception as err:
