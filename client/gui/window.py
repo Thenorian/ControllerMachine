@@ -16,7 +16,7 @@ from catalog import DeviceCatalog
 from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
 from gui.folder_prompt import FolderPromptService
-from gui.template_editor import TemplateBasicFrame
+from gui.template_editor import TemplateStatusFrame
 from transport import ControllerTransport
 
 TYPE_LABELS = {
@@ -420,18 +420,10 @@ class DeviceDialog(tk.Toplevel):
         self.cut_combo = ttk.Combobox(self.settings_frame, values=list(CUT_LABELS.values()),
                                        state="readonly", width=8)
         self.cut_combo.grid(row=1, column=3, sticky="w", padx=(4, 0), pady=(4, 0))
-
-        ttk.Label(self.settings_frame, text="Cabeçalho:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.header_entry = ttk.Entry(self.settings_frame, width=40)
-        self.header_entry.grid(row=2, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
-
-        ttk.Label(self.settings_frame, text="Rodapé:").grid(row=3, column=0, sticky="w", pady=(4, 0))
-        self.footer_entry = ttk.Entry(self.settings_frame, width=40)
-        self.footer_entry.grid(row=3, column=1, columnspan=3, sticky="we", padx=(4, 0), pady=(4, 0))
         row += 1
 
-        self.template_frame = TemplateBasicFrame(body)
-        self.template_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
+        self.template_status = TemplateStatusFrame(body)
+        self.template_status.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
         row += 1
 
         self._build_kind_frames()
@@ -534,10 +526,10 @@ class DeviceDialog(tk.Toplevel):
         show_settings = type_ == "printer_fiscal" and kind in KINDS_WITH_PRINT_SETTINGS
         if show_settings:
             self.settings_frame.grid()
-            self.template_frame.grid()
+            self.template_status.grid()
         else:
             self.settings_frame.grid_remove()
-            self.template_frame.grid_remove()
+            self.template_status.grid_remove()
 
     def _browse_file_path(self) -> None:
         path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação")
@@ -564,7 +556,8 @@ class DeviceDialog(tk.Toplevel):
         self.encoding_combo.set(ENCODING_LABELS["cp860"])
         self.cut_combo.set(CUT_LABELS["full"])
         self.baud_combo.set("9600")
-        self.template_frame.load({})
+        self.template_status.load(None)
+        self._device = device
 
         if device is None:
             self.type_combo.current(0)
@@ -590,12 +583,7 @@ class DeviceDialog(tk.Toplevel):
             self.encoding_combo.set(ENCODING_LABELS.get(settings["encoding"], settings["encoding"]))
         if settings.get("cut_mode"):
             self.cut_combo.set(CUT_LABELS.get(settings["cut_mode"], settings["cut_mode"]))
-        template = settings.get("template") or {}
-        # Compat: header_text/footer_text viviam soltos em settings antes do
-        # editor de modelo existir (ver main.py::_dispatch_fiscal, mesma regra).
-        self.header_entry.insert(0, template.get("header_text", settings.get("header_text", "")))
-        self.footer_entry.insert(0, template.get("footer_text", settings.get("footer_text", "")))
-        self.template_frame.load(template)
+        self.template_status.load(settings.get("template"))
 
         kind = connection.get("kind")
         if kind == "os_printer":
@@ -640,12 +628,12 @@ class DeviceDialog(tk.Toplevel):
             settings["encoding"] = ENCODING_BY_LABEL.get(self.encoding_combo.get(), "cp860")
             settings["cut_mode"] = CUT_BY_LABEL.get(self.cut_combo.get(), "full")
 
-            template = self.template_frame.read()
-            if self.header_entry.get().strip():
-                template["header_text"] = self.header_entry.get().strip()
-            if self.footer_entry.get().strip():
-                template["footer_text"] = self.footer_entry.get().strip()
-            settings["template"] = template
+            # Layout (template) nunca é editado aqui — só chega por push do
+            # Simple ERP (ver gui/template_editor.py::TemplateStatusFrame).
+            # Preserva o que já estava, se houver, em vez de apagar.
+            existing_template = ((self._device or {}).get("settings") or {}).get("template")
+            if existing_template:
+                settings["template"] = existing_template
 
         brand = self.brand_combo.get().strip() or "generic"
         if type_ == "scale":

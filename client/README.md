@@ -62,7 +62,7 @@ renomeado ou realocado do lado do Simple ERP.
 - `devices/` — execução dos jobs (impressão comum, fiscal/NFC-e, balança
   por marca em `devices/scale/`).
 - `gui/` — janela Tkinter + tray do Windows. `gui/template_editor.py`
-  contém o editor de modelo de impressão (ver seção abaixo).
+  contém o status (só leitura) do modelo de impressão (ver seção abaixo).
 - `service_linux.py` — instalador do serviço systemd.
 - `assets/generate_icon.py` — gera o ícone pixel-art usado na bandeja.
 - `logging_setup.py` — logs em disco (`logs/` ao lado do programa, rotação
@@ -78,31 +78,34 @@ guardados — os mais antigos somem sozinhos (`logging_setup.py`).
 
 ## Modelo de impressão (DANFE NFC-e / Cupom)
 
-Quem desenha o cupom/nota é sempre o Controller Machine
-(`devices/printer_fiscal.py::render_danfe_nfce`) — o Simple ERP só manda
-dados da venda (itens, totais, atendente, PDV...), nunca layout. Editar o
-dispositivo do tipo "Impressora fiscal (DANFE)" na GUI (Windows) abre a
-seção "Modelo de impressão":
+Quem *desenha* os bytes do cupom/nota (ESC/POS, quebra de linha, QR Code)
+continua sendo o Controller Machine (`devices/printer_fiscal.py::render_danfe_nfce`)
+— tem que ser aqui, é quem fala com a impressora física. Mas quem *decide*
+o layout (mostrar/ocultar IE, título do cupom, mensagem padrão da empresa,
+QR Code, e no cupom até a composição por blocos) é sempre o **Simple ERP**:
+o Controller Machine nunca edita isso localmente, só recebe por push (job
+`set_template`, chamado do lado do Simple ERP via
+`server/connector.py::send_template_update(controller_id, device_id, template)`)
+e guarda em cache em `device["settings"]["template"]` no `config.json` —
+só pra continuar imprimindo se a conexão cair, nunca como fonte de verdade.
 
-- **Modo Básico**: mostrar/ocultar IE, título do cupom, mensagem padrão da
-  empresa, tamanho/correção de erro do QR Code — qualquer usuário Admin,
-  sempre dentro da estrutura fixa da NFC-e.
-- **Modo Avançado** (botão "Modo Avançado (cupom)...", com aviso de
-  confirmação — reservado à equipe Thenorian, toda alteração é logada em
-  `logs/`): editor de blocos livre, reordena/adiciona/remove — mas **só
-  vale pro cupom**. A trava é estrutural, não é validação: o renderer só lê
-  `blocos_customizados` quando `tipo_documento="cupom"`, e o vocabulário de
-  blocos (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`) não tem QR
-  Code/chave de acesso/protocolo como opção — não tem como um template mal
-  configurado (nem editado à mão no `config.json`) tirar campo obrigatório
-  de uma nota fiscal real.
-- **Exportar/Importar modelo**: baixa/sobe o `template` inteiro como
-  `.json` — configura uma impressora certa e replica pras outras sem
-  reconfigurar campo por campo.
+Mudou uma regra fiscal ou o leiaute da nota? Um `send_template_update` por
+controller da empresa (loop simples do lado do Simple ERP) — nunca ida loja
+por loja reconfigurar dispositivo por dispositivo.
 
-Tudo fica em `device["settings"]["template"]` no `config.json` local — sem
-Linux (sem GUI ainda), editar essa chave direto no arquivo, mesmo padrão
-do resto das configurações.
+Editar o dispositivo do tipo "Impressora fiscal (DANFE)" na GUI (Windows)
+mostra a seção "Modelo de impressão (sincronizado pelo Simple ERP)" — um
+resumo só leitura do que está em cache agora (título do cupom, mensagens,
+se o Modo Avançado do cupom está ativo). Não tem campo editável ali de
+propósito: a interface de edição do modelo vive do lado do Simple ERP, não
+aqui.
+
+O vocabulário de blocos do Modo Avançado (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`)
+continua existindo e a trava continua estrutural — o renderer só lê
+`blocos_customizados` quando `tipo_documento="cupom"`, e não tem QR
+Code/chave de acesso/protocolo como opção de bloco — não tem como um
+template mal configurado (nem um push malformado) tirar campo obrigatório
+de uma nota fiscal real.
 
 ## Instaladores (Windows / Linux)
 

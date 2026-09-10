@@ -23,8 +23,18 @@ API externa.
    ```
 
 4. Use os métodos de consulta/envio (`is_online`, `send_print_job`,
-   `send_fiscal_job`, `send_scale_update`) de onde precisar no sistema —
-   uma tela de PDV, um botão "reimprimir", etc.
+   `send_fiscal_job`, `send_scale_update`, `send_template_update`) de onde
+   precisar no sistema — uma tela de PDV, um botão "reimprimir", etc.
+
+## Layout de nota fiscal/cupom é decisão do Simple ERP, não do Controller Machine
+
+O Controller Machine **nunca** decide layout por conta própria — ele só
+aplica o `template` que chegar por `send_template_update(controller_id,
+device_id, template)` (ver contrato completo em
+`client/devices/printer_fiscal.py`). Quando uma regra fiscal ou o leiaute
+mudar, é isso que o Simple ERP chama pra cada controller da empresa — nunca
+edição feita loja por loja no Controller Machine (não existe mais editor de
+layout do lado do client de propósito).
 
 ## O que este módulo faz e o que ele não faz
 
