@@ -23,10 +23,27 @@ do Tkinter — cria já com os valores prontos via construtor:
 — ou ajustando atributo por atributo depois de criado (`server.template.NFCe.qr_code.size = 8`).
 `Text` só tem `bold`/`align` (não `fontsize`): impressora térmica ESC/POS
 não tem fonte variável por trecho de texto, só um toggle de documento
-inteiro (Font A/Font B — ver `fonte_pequena` abaixo). `QRCode` não tem
-`value`: o conteúdo do QR é dado da VENDA (vem no payload de cada nota,
-nunca do template — ver contrato em printer_fiscal.py), só o module
-size/correção de erro são de fato configuráveis aqui.
+inteiro (Font A/Font B — ver `fonte_pequena` abaixo, condensada por
+padrão). `QRCode` não tem `value`: o conteúdo do QR é dado da VENDA (vem
+no payload de cada nota, nunca do template — ver contrato em
+printer_fiscal.py), só o module size/correção de erro são de fato
+configuráveis aqui.
+
+Pra manipulação mais fina (sublinhado, texto invertido, tamanho do
+caractere, código de barras, pulso de gaveta de dinheiro, ou qualquer
+comando ESC/POS crus que o Controller Machine não modele por nome — ver
+`EscPosBuilder.raw()` no client) só o `Cupom` aceita, via
+`blocos_customizados` — cada bloco é um dict simples, não um objeto desta
+classe (ver TIPOS_BLOCO_VALIDOS em client/devices/printer_fiscal.py pro
+vocabulário completo):
+
+    server.template.Cupom.usar_blocos_customizados([
+        {"tipo": "cabecalho"},
+        {"tipo": "texto", "texto": "PROMOÇÃO", "negrito": True, "tamanho": [2, 2]},
+        {"tipo": "codigo_barras", "dados": "789123456", "simbologia": "code128"},
+        {"tipo": "itens"}, {"tipo": "totais"}, {"tipo": "pagamentos"},
+        {"tipo": "abrir_gaveta"},
+    ])
 
 Segunda forma de personalizar, quando não é só um valor mas a própria
 regra de montagem que muda — herdar e sobrescrever:
@@ -77,15 +94,15 @@ class Template:
 
     def __init__(self, header: Text | None = None, footer: Text | None = None,
                  mensagem_empresa: Text | None = None, qr_code: QRCode | None = None,
-                 mostrar_ie: bool = True, pdv_label: str = "", fonte_pequena: bool = False,
+                 mostrar_ie: bool = True, pdv_label: str = "", fonte_pequena: bool = True,
                  blocos_customizados: list[dict] | None = None):
-        self.header = header if header is not None else Text()
-        self.footer = footer if footer is not None else Text()
-        self.mensagem_empresa = mensagem_empresa if mensagem_empresa is not None else Text()
+        self.header = header if header is not None else Text(align="center")
+        self.footer = footer if footer is not None else Text(align="center")
+        self.mensagem_empresa = mensagem_empresa if mensagem_empresa is not None else Text(align="left")
         self.qr_code = qr_code if qr_code is not None else QRCode()
         self.mostrar_ie = mostrar_ie
         self.pdv_label = pdv_label     # nome do caixa/PDV — nunca o nome do dispositivo de impressão
-        self.fonte_pequena = fonte_pequena  # Font B (ESC/POS) — condensada, cabe mais texto na mesma bobina
+        self.fonte_pequena = fonte_pequena  # Font B (ESC/POS) — condensada por padrão, economiza bobina
         self.blocos_customizados = blocos_customizados
 
     def to_dict(self) -> dict:
@@ -94,9 +111,15 @@ class Template:
         manda pela rede."""
         return {
             "header_text": self.header.text,
+            "header_bold": self.header.bold,
+            "header_align": self.header.align,
             "footer_text": self.footer.text,
+            "footer_bold": self.footer.bold,
+            "footer_align": self.footer.align,
             "mostrar_ie": self.mostrar_ie,
             "mensagem_empresa": self.mensagem_empresa.text,
+            "mensagem_empresa_bold": self.mensagem_empresa.bold,
+            "mensagem_empresa_align": self.mensagem_empresa.align,
             "qr_module_size": self.qr_code.size,
             "qr_error_correction": self.qr_code.error_correction,
             "cupom_titulo": self.titulo,

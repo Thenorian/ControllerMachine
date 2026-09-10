@@ -42,12 +42,16 @@ mudar, é isso que o sistema que embutiu o `Server` manda pra cada controller
 da empresa — nunca edição feita loja por loja no Controller Machine (não
 existe editor de layout do lado do client, de propósito).
 
-Do lado de quem integrou, `templates.py` modela isso de forma orientada a
-objetos: `Server.template` é um `NFCe`/`NFe`/`Cupom` por tipo de documento
-(cada um com seções reutilizáveis estilo Tkinter — `Text(text=..., bold=...)`,
-`QRCode(size=..., error_correction=...)` — além de `mostrar_ie`, `pdv_label`
-e `fonte_pequena`), e `.to_dict()` serializa pro mesmo dict de sempre. Duas
-formas de mudar o layout:
+`server.template` já vem com um `NFCe`/`NFe`/`Cupom` padrão pronto pra uso —
+não precisa configurar nada antes do primeiro `push_template`, o template
+vazio já imprime um documento completo (fonte condensada por padrão, pra
+economizar bobina). Do lado de quem integrou, `templates.py` modela isso de
+forma orientada a objetos: seções reutilizáveis estilo Tkinter
+(`Text(text=..., bold=..., align=...)`, `QRCode(size=..., error_correction=...)`)
+além de `mostrar_ie`, `pdv_label` e `fonte_pequena`, e `.to_dict()` serializa
+pro mesmo dict de sempre. Duas formas de mudar o layout — qualquer uma
+funciona como um *override* em cima do padrão, nunca precisa reescrever
+tudo:
 
 ```python
 # 1. ajustar atributo direto
@@ -65,6 +69,23 @@ class MinhaNFCe(NFCe):
         return d
 
 server.template.NFCe = MinhaNFCe()
+```
+
+Pra manipulação mais fina — sublinhado, texto invertido, tamanho do
+caractere, código de barras, pulso de gaveta de dinheiro ou qualquer
+comando ESC/POS cru — só o `Cupom` aceita, via `blocos_customizados`
+(cada bloco é um dict simples, ver TIPOS_BLOCO_VALIDOS em
+`client/devices/printer_fiscal.py` e `EscPosBuilder` em
+`client/devices/escpos.py` pro que existe):
+
+```python
+server.template.Cupom.usar_blocos_customizados([
+    {"tipo": "cabecalho"},
+    {"tipo": "texto", "texto": "PROMOÇÃO", "negrito": True, "tamanho": [2, 2]},
+    {"tipo": "codigo_barras", "dados": "789123456", "simbologia": "code128"},
+    {"tipo": "itens"}, {"tipo": "totais"}, {"tipo": "pagamentos"},
+    {"tipo": "abrir_gaveta"},
+])
 ```
 
 E pra empresa inteira, sempre que a regra mudar:
