@@ -16,7 +16,6 @@ from catalog import DeviceCatalog
 from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
 from gui.folder_prompt import FolderPromptService
-from gui.template_editor import TemplateStatusFrame
 from transport import ControllerTransport
 
 TYPE_LABELS = {
@@ -422,10 +421,6 @@ class DeviceDialog(tk.Toplevel):
         self.cut_combo.grid(row=1, column=3, sticky="w", padx=(4, 0), pady=(4, 0))
         row += 1
 
-        self.template_status = TemplateStatusFrame(body)
-        self.template_status.grid(row=row, column=0, columnspan=3, sticky="we", pady=(8, 0))
-        row += 1
-
         self._build_kind_frames()
 
         buttons = ttk.Frame(body)
@@ -526,10 +521,8 @@ class DeviceDialog(tk.Toplevel):
         show_settings = type_ == "printer_fiscal" and kind in KINDS_WITH_PRINT_SETTINGS
         if show_settings:
             self.settings_frame.grid()
-            self.template_status.grid()
         else:
             self.settings_frame.grid_remove()
-            self.template_status.grid_remove()
 
     def _browse_file_path(self) -> None:
         path = filedialog.asksaveasfilename(parent=self, title="Arquivo de exportação")
@@ -556,7 +549,6 @@ class DeviceDialog(tk.Toplevel):
         self.encoding_combo.set(ENCODING_LABELS["cp860"])
         self.cut_combo.set(CUT_LABELS["full"])
         self.baud_combo.set("9600")
-        self.template_status.load(None)
         self._device = device
 
         if device is None:
@@ -583,7 +575,6 @@ class DeviceDialog(tk.Toplevel):
             self.encoding_combo.set(ENCODING_LABELS.get(settings["encoding"], settings["encoding"]))
         if settings.get("cut_mode"):
             self.cut_combo.set(CUT_LABELS.get(settings["cut_mode"], settings["cut_mode"]))
-        self.template_status.load(settings.get("template"))
 
         kind = connection.get("kind")
         if kind == "os_printer":
@@ -628,9 +619,9 @@ class DeviceDialog(tk.Toplevel):
             settings["encoding"] = ENCODING_BY_LABEL.get(self.encoding_combo.get(), "cp860")
             settings["cut_mode"] = CUT_BY_LABEL.get(self.cut_combo.get(), "full")
 
-            # Layout (template) nunca é editado aqui — só chega por push do
-            # Simple ERP (ver gui/template_editor.py::TemplateStatusFrame).
-            # Preserva o que já estava, se houver, em vez de apagar.
+            # Layout (template) nunca é editado aqui — só chega por push de
+            # quem embutiu o Server. Preserva o que já estava, se houver,
+            # em vez de apagar.
             existing_template = ((self._device or {}).get("settings") or {}).get("template")
             if existing_template:
                 settings["template"] = existing_template

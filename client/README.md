@@ -61,8 +61,7 @@ renomeado ou realocado do lado do Simple ERP.
 - `transport.py` — socket com o connector, reconexão automática.
 - `devices/` — execução dos jobs (impressão comum, fiscal/NFC-e, balança
   por marca em `devices/scale/`).
-- `gui/` — janela Tkinter + tray do Windows. `gui/template_editor.py`
-  contém o status (só leitura) do modelo de impressão (ver seção abaixo).
+- `gui/` — janela Tkinter + tray do Windows.
 - `service_linux.py` — instalador do serviço systemd.
 - `assets/generate_icon.py` — gera o ícone pixel-art usado na bandeja.
 - `logging_setup.py` — logs em disco (`logs/` ao lado do programa, rotação
@@ -82,23 +81,22 @@ Quem *desenha* os bytes do cupom/nota (ESC/POS, quebra de linha, QR Code)
 continua sendo o Controller Machine (`devices/printer_fiscal.py::render_danfe_nfce`)
 — tem que ser aqui, é quem fala com a impressora física. Mas quem *decide*
 o layout (mostrar/ocultar IE, título do cupom, mensagem padrão da empresa,
-QR Code, e no cupom até a composição por blocos) é sempre o **Simple ERP**:
-o Controller Machine nunca edita isso localmente, só recebe por push (job
-`set_template`, chamado do lado do Simple ERP via
-`server/connector.py::send_template_update(controller_id, device_id, template)`)
-e guarda em cache em `device["settings"]["template"]` no `config.json` —
-só pra continuar imprimindo se a conexão cair, nunca como fonte de verdade.
+QR Code, e no cupom até a composição por blocos) é sempre de quem embutiu
+o `server/` (Simple ERP ou qualquer outro sistema): o Controller Machine
+nunca edita isso localmente, só recebe por push (job `set_template`,
+mandado via `server/connector.py::send_template_update(...)` ou
+`server/server.py::Server.push_template(...)`) e guarda em cache em
+`device["settings"]["template"]` no `config.json` — só pra continuar
+imprimindo se a conexão cair, nunca como fonte de verdade.
 
-Mudou uma regra fiscal ou o leiaute da nota? Um `send_template_update` por
-controller da empresa (loop simples do lado do Simple ERP) — nunca ida loja
-por loja reconfigurar dispositivo por dispositivo.
+Mudou uma regra fiscal ou o leiaute da nota? Um `push_template`/`send_template_update`
+por controller da empresa (loop simples do lado de quem integrou) — nunca
+ida loja por loja reconfigurar dispositivo por dispositivo.
 
-Editar o dispositivo do tipo "Impressora fiscal (DANFE)" na GUI (Windows)
-mostra a seção "Modelo de impressão (sincronizado pelo Simple ERP)" — um
-resumo só leitura do que está em cache agora (título do cupom, mensagens,
-se o Modo Avançado do cupom está ativo). Não tem campo editável ali de
-propósito: a interface de edição do modelo vive do lado do Simple ERP, não
-aqui.
+A GUI local (janela de cadastro do dispositivo) não mostra nem edita nada
+do `template` de propósito — não tem campo, resumo ou editor de layout do
+lado do client. A interface de edição do modelo vive de quem embutiu o
+`Server` (Simple ERP ou outro sistema).
 
 O vocabulário de blocos do Modo Avançado (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`)
 continua existindo e a trava continua estrutural — o renderer só lê
