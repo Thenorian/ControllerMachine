@@ -5,7 +5,16 @@ operacional (Windows) ou no CUPS (Linux). Não tenta descobrir balança
 automaticamente — balança normalmente não se anuncia na rede (é serial ou
 IP fixo configurado no equipamento), então esse cadastro é sempre manual
 (ver gui/window.py, botão "Adicionar dispositivo manualmente").
-"""
+
+A lista inclui QUALQUER fila instalada, inclusive driver virtual
+("Microsoft Print to PDF", "Microsoft XPS Document Writer", impressora de
+Fax) — o Windows não distingue isso de uma impressora física na API de
+enumeração. Selecionar um driver virtual funciona pra job já em PDF
+(`data_type="pdf"`, via `printer_common.print_pdf`), mas sempre abre a
+caixa "Salvar como" do driver — sem ninguém pra clicar "Salvar", o job
+trava esperando. Pra automação de verdade (sem diálogo, sem gente na
+loja), usar `connection.kind = "pdf_folder"` em vez de escolher um driver
+virtual aqui — salva o PDF direto numa pasta, sem interação nenhuma."""
 from __future__ import annotations
 
 import logging

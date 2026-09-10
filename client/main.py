@@ -27,21 +27,40 @@ setup_logging()
 logger = logging.getLogger("main")
 
 
+# Descrição amigável de cada job pro log de texto (arquivo em logs/ e aba
+# "Log" na janela) — pedido pra dar visibilidade tipo "[data/hora] Impresso
+# documento fiscal NFC-e", "Comunicação com a balança" etc. sem precisar
+# abrir o histórico (aba "Histórico"/print_history.db) pra saber o que
+# aconteceu. `%(asctime)s` do próprio logging já cobre a parte de data/hora
+# (ver logging_setup.py), aqui só monta o texto.
+_DESCRICAO_JOB = {
+    "print": "Impressão comum",
+    "scale_update": "Comunicação com a balança",
+}
+_DESCRICAO_FISCAL = {
+    "nfce": "Impressão de documento fiscal NFC-e",
+    "cupom": "Impressão de cupom (sem valor fiscal)",
+    "caixa": "Impressão de cupom de caixa (abertura/fechamento)",
+}
+JOBS_RASTREADOS = {"print", "print_fiscal_nfce", "scale_update"}
+
+
 def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
     """ask_folder: callable(title: str) -> str | None, opcional — usado só
-    por dispositivo fiscal configurado como "perguntar a pasta a cada
-    impressão" (ver DeviceDialog em gui/window.py). None quando não há GUI
-    disponível pra perguntar nada (ex.: Linux headless)."""
+    por dispositivo (fiscal ou comum) configurado como "perguntar a pasta a
+    cada impressão" (ver DeviceDialog em gui/window.py). None quando não há
+    GUI disponível pra perguntar nada (ex.: Linux headless)."""
     kind = job.get("kind")
     device = catalog.get_device(job.get("device_id", ""))
     if device is None:
         return {"status": "error", "message": f"dispositivo desconhecido: {job.get('device_id')}"}
 
-    is_print_job = kind in ("print", "print_fiscal_nfce")
+    rastreado = kind in JOBS_RASTREADOS
+    descricao = _descricao_job(kind, job) if rastreado else None
 
     try:
         if kind == "print":
-            _dispatch_print(device, job)
+            _dispatch_print(device, job, ask_folder)
         elif kind == "print_fiscal_nfce":
             _dispatch_fiscal(device, job, ask_folder)
         elif kind == "scale_update":
@@ -52,34 +71,51 @@ def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
             return {"status": "error", "message": f"kind desconhecido: {kind}"}
     except Exception as err:
         logger.exception(f"Falha executando job {kind} no device {device['label']}")
-        if is_print_job:
+        if rastreado:
+            logger.warning(f"{descricao} FALHOU — {device['label']}: {err}")
             print_history.registrar(
                 device["device_id"], device["label"], kind, _job_tipo_documento(kind, job),
                 sucesso=False, mensagem=str(err),
             )
         return {"status": "error", "message": str(err)}
 
-    if is_print_job:
+    if rastreado:
+        logger.info(f"{descricao} — {device['label']}")
         print_history.registrar(
             device["device_id"], device["label"], kind, _job_tipo_documento(kind, job), sucesso=True,
         )
     return {"status": "done"}
 
 
+def _descricao_job(kind: str, job: dict) -> str:
+    if kind == "print_fiscal_nfce":
+        if job.get("data_type") == "pdf":
+            return "Impressão de DANFE (PDF já pronto)"
+        tipo_doc = (job.get("data") or {}).get("tipo_documento", "nfce")
+        return _DESCRICAO_FISCAL.get(tipo_doc, "Impressão fiscal")
+    return _DESCRICAO_JOB.get(kind, kind)
+
+
 def _job_tipo_documento(kind: str, job: dict) -> str | None:
-    """"nfce"/"cupom" pro job fiscal (vem do próprio payload da venda) —
-    None pra impressão comum (job "print" não carrega esse conceito) e pro
-    fiscal já vindo pronto em PDF (job["data"] é base64, não o payload)."""
+    """"nfce"/"cupom"/"caixa" pro job fiscal (vem do próprio payload da
+    venda) — None pra impressão comum/balança (não carregam esse conceito)
+    e pro fiscal já vindo pronto em PDF (job["data"] é base64, não o
+    payload)."""
     if kind != "print_fiscal_nfce" or job.get("data_type") == "pdf":
         return None
     return (job.get("data") or {}).get("tipo_documento")
 
 
-def _dispatch_print(device: dict, job: dict) -> None:
+def _dispatch_print(device: dict, job: dict, ask_folder=None) -> None:
     data = base64.b64decode(job["data"])
     connection = device["connection"]
+    is_pdf = job.get("data_type") == "pdf"
 
-    if job.get("data_type") == "pdf":
+    if connection["kind"] == "pdf_folder":
+        if not is_pdf:
+            raise ValueError("connection kind 'pdf_folder' exige job com data_type='pdf'")
+        _salvar_pdf_em_pasta(device, connection, data, job.get("job_id"), ask_folder)
+    elif is_pdf:
         printer_common.print_pdf(connection, data)
     elif connection["kind"] == "os_printer":
         printer_common.print_raw(connection, data)
@@ -87,6 +123,26 @@ def _dispatch_print(device: dict, job: dict) -> None:
         printer_common.print_via_tcp(connection, data)
     else:
         raise ValueError(f"conexão não suportada para impressão: {connection}")
+
+
+def _salvar_pdf_em_pasta(device: dict, connection: dict, data: bytes, job_id: str | None, ask_folder=None) -> None:
+    """Compartilhado por impressão comum e fiscal — connection kind
+    "pdf_folder" nos dois casos. Existe pra quem quer salvar o PDF em disco
+    em vez de imprimir de fato (ex.: alternativa a apontar pra um driver
+    virtual como "Microsoft Print to PDF", que sempre abre uma caixa de
+    diálogo pra escolher onde salvar — aqui é automático)."""
+    path = connection.get("path")
+    if connection.get("ask_each_time") or not path:
+        if ask_folder is None:
+            raise RuntimeError(
+                "dispositivo configurado para perguntar a pasta a cada impressão, "
+                "mas a interface gráfica não está disponível pra perguntar"
+            )
+        path = ask_folder(f"Salvar PDF — {device['label']}")
+        if not path:
+            raise RuntimeError("operador não escolheu pasta — PDF não foi salvo")
+
+    printer_common.save_pdf_to_folder({"path": path}, data, name_hint=job_id)
 
 
 def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
@@ -128,19 +184,7 @@ def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
     if connection["kind"] == "pdf_folder":
         if not is_pdf:
             raise ValueError("connection kind 'pdf_folder' exige job com data_type='pdf'")
-
-        path = connection.get("path")
-        if connection.get("ask_each_time") or not path:
-            if ask_folder is None:
-                raise RuntimeError(
-                    "dispositivo configurado para perguntar a pasta a cada impressão, "
-                    "mas a interface gráfica não está disponível pra perguntar"
-                )
-            path = ask_folder(f"Salvar DANFE — {device['label']}")
-            if not path:
-                raise RuntimeError("operador não escolheu pasta — DANFE não foi salvo")
-
-        printer_common.save_pdf_to_folder({"path": path}, data, name_hint=job.get("job_id"))
+        _salvar_pdf_em_pasta(device, connection, data, job.get("job_id"), ask_folder)
     elif connection["kind"] == "os_printer":
         if is_pdf:
             printer_common.print_pdf(connection, data)
