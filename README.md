@@ -1,18 +1,29 @@
 # Controller Machine
 
-Programa que roda na loja do cliente e dá acesso ao Simple ERP a impressoras
-(comuns e fiscais/NFC-e) e balanças da rede local — sem o Simple ERP precisar
-estar na mesma rede, e contornando CGNAT.
+Programa que roda na loja do cliente e dá acesso a impressoras (comuns e
+fiscais/NFC-e) e balanças da rede local pra um sistema (ERP, PDV, o que
+for) rodando fora dessa rede — sem precisar estar na mesma rede do
+cliente, e contornando CGNAT.
 
-Documentação completa (arquitetura, protocolo, schema de `config.json`,
-regra de IDs) está no vault do Obsidian da Thenorian, handoff "Controller
-Machine" na pasta `Documentação/interna/Simple  ERP/`.
+Projeto **open source (GPLv3)**. A Thenorian usa isso embutido no Simple
+ERP — é a implementação de referência, citada nos exemplos — mas nada
+aqui depende dele: `server/` não guarda nem conhece nada de empresa,
+licença ou banco de dados de ninguém (`auth_check` é sempre um callback
+que quem for embutir implementa), então qualquer sistema pode embutir a
+mesma ponte pro próprio caso. Ver a [Wiki](../../wiki) pra documentação
+completa da arquitetura.
+
+Documentação interna adicional (específica da Thenorian: como o Simple
+ERP integra de fato, licenciamento, etc.) está no vault do Obsidian da
+Thenorian, handoff "Controller Machine" — não é necessária pra usar ou
+contribuir com este repositório.
 
 ## Componentes
 
-- **`server/`** — não é um servidor separado. É `connector.py`
-  (`ControllerConnector`), uma classe que o **Simple ERP copia pro próprio
-  código** e roda numa thread própria — ver `server/README.md`.
+- **`server/`** — não é um servidor separado. É código que **quem for
+  integrar copia pro próprio processo** (`ControllerConnector` — só
+  transporte — e a fachada `Server`, que adiciona o modelo de template
+  orientado a objetos) e roda numa thread própria — ver `server/README.md`.
 - **`client/`** — o Controller Machine em si, roda na loja. Windows: ícone
   na bandeja + janela de cadastro. Linux: serviço systemd (`python main.py
   --install-service`).

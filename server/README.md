@@ -1,19 +1,22 @@
-# server/ — módulo embutido para o Simple ERP
+# server/ — módulo embutido pra quem for integrar
 
-Isto não é um servidor à parte. É o código que o **Simple ERP** importa
-direto dentro do próprio processo dele, pra saber quais lojas/dispositivos
-estão online e mandar jobs de impressão/balança sem precisar chamar nenhuma
-API externa.
+Isto não é um servidor à parte, e não é exclusivo do Simple ERP — é código
+que **qualquer sistema** (ERP, PDV, o que for) importa direto dentro do
+próprio processo dele, pra saber quais lojas/dispositivos estão online e
+mandar jobs de impressão/balança sem precisar chamar nenhuma API externa.
+A Thenorian usa isso no Simple ERP — é a implementação de referência nos
+exemplos abaixo — mas nada aqui depende dele.
 
-## Como embutir no Simple ERP
+## Como embutir no seu sistema
 
-1. Copie a pasta `server/` inteira pra dentro do repositório do Simple ERP
-   (`connector.py` + `templates.py` + `server.py` — só biblioteca padrão do
-   Python, sem dependência de mais nada deste repo).
+1. Copie a pasta `server/` inteira pra dentro do repositório do seu
+   sistema (`connector.py` + `templates.py` + `server.py` — só biblioteca
+   padrão do Python, sem dependência de mais nada deste repo).
 2. Escreva uma função `check_auth(controller_id, secret) -> bool` que
-   consulte o banco do próprio Simple ERP (isso é responsabilidade do Simple
-   ERP, não deste módulo — nem `ControllerConnector` nem `Server` guardam
-   ou sabem nada sobre empresas).
+   consulte o seu próprio banco (isso é responsabilidade de quem integra,
+   não deste módulo — nem `ControllerConnector` nem `Server` guardam ou
+   sabem nada sobre empresas, licenças ou qualquer regra de negócio de
+   quem os usa).
 3. Suba o `Server` numa thread própria, junto com o resto do sistema:
 
    ```python
@@ -30,16 +33,16 @@ API externa.
    (sem o modelo de template orientado a objetos) pode continuar usando
    `ControllerConnector` direto, sem essa camada extra.
 
-## Layout de nota fiscal/cupom é decisão do Simple ERP, não do Controller Machine
+## Layout de nota fiscal/cupom é decisão de quem integra, não do Controller Machine
 
 O Controller Machine **nunca** decide layout por conta própria — ele só
 aplica o `template` que chegar por push (ver contrato completo do dict em
 `client/devices/printer_fiscal.py`). Quando uma regra fiscal ou o leiaute
-mudar, é isso que o Simple ERP manda pra cada controller da empresa — nunca
-edição feita loja por loja no Controller Machine (não existe mais editor de
-layout do lado do client de propósito).
+mudar, é isso que o sistema que embutiu o `Server` manda pra cada controller
+da empresa — nunca edição feita loja por loja no Controller Machine (não
+existe mais editor de layout do lado do client de propósito).
 
-Do lado do Simple ERP, `templates.py` modela isso de forma orientada a
+Do lado de quem integrou, `templates.py` modela isso de forma orientada a
 objetos: `Server.template` é um `NFCe`/`NFe`/`Cupom` por tipo de documento
 (cada um com seções como `.cabecalho`, `.qr_code`, `.rodape`, `.mensagem_empresa`),
 e `.to_dict()` serializa pro mesmo dict de sempre. Duas formas de mudar o
@@ -77,14 +80,17 @@ for controller_id in controllers_da_empresa(empresa_id):
   conectado agora, repassa job e espera o `ack`.
 - Não faz: não monta ESC/POS, não sabe layout de balança, não sabe nada de
   NFC-e, não guarda cadastro de empresa/dispositivo em banco nenhum. Tudo
-  isso é do lado do Controller Machine (`client/`) ou do próprio Simple ERP.
+  isso é do lado do Controller Machine (`client/`) ou de quem integrou.
 
-Ver a documentação completa (protocolo, formato de `config.json` do client,
-regra de IDs) no vault do Obsidian — handoff "Controller Machine" na pasta
-`Documentação/interna/Simple  ERP/`.
+Documentação completa da arquitetura pra quem for usar/contribuir está na
+[Wiki deste repositório](../../wiki). O vault do Obsidian citado em outros
+lugares é documentação **interna da Thenorian** (como o Simple ERP integra
+de fato, licenciamento, etc.) — não é necessário pra embutir isto no seu
+próprio sistema.
 
-## Testar sem o Simple ERP
+## Testar sem nenhum sistema de verdade integrado
 
 `python example_usage.py` sobe um connector de teste com auth via SQLite
 solto — serve só pra testar a conexão de ponta a ponta com um Controller
-Machine local, não é como o Simple ERP vai usar de verdade.
+Machine local, não representa como nenhum sistema real vai usar (Simple
+ERP ou qualquer outro).
