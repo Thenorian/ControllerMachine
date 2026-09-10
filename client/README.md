@@ -1,8 +1,8 @@
 # client/ — Controller Machine
 
-Roda na loja do cliente. Documentação completa (protocolo, arquitetura) está
-no vault do Obsidian — handoff "Controller Machine" — este arquivo é só
-referência rápida do que está neste diretório.
+Roda na loja do cliente. Documentação completa (protocolo, arquitetura)
+está na [Wiki deste repositório](../wiki) — este arquivo é só referência
+rápida do que está neste diretório.
 
 ## Rodar
 
@@ -59,10 +59,14 @@ renomeado ou realocado do lado do Simple ERP.
 - `config.py` / `catalog.py` — persistência e regra de IDs imutáveis.
 - `discovery.py` — impressoras instaladas no SO (Windows/Linux).
 - `transport.py` — socket com o connector, reconexão automática.
-- `devices/` — execução dos jobs (impressão comum, fiscal/NFC-e, balança
-  por marca em `devices/scale/`).
-- `gui/` — janela Tkinter + tray do Windows. `gui/template_editor.py`
-  contém o editor de modelo de impressão (ver seção abaixo).
+- `devices/` — execução dos jobs: impressão comum, fiscal/NFC-e
+  (`printer_fiscal.py`), cupom de caixa (`printer_cash.py`, não fiscal),
+  balança por marca em `devices/scale/`, motor de placeholder de texto
+  livre (`template_text.py`).
+- `gui/` — janela Tkinter + tray do Windows.
+- `print_history.py` — histórico local (SQLite) dos jobs de impressão
+  executados, sucesso/falha — aba "Histórico" na janela, nunca guarda o
+  conteúdo impresso.
 - `service_linux.py` — instalador do serviço systemd.
 - `assets/generate_icon.py` — gera o ícone pixel-art usado na bandeja.
 - `logging_setup.py` — logs em disco (`logs/` ao lado do programa, rotação
@@ -78,31 +82,40 @@ guardados — os mais antigos somem sozinhos (`logging_setup.py`).
 
 ## Modelo de impressão (DANFE NFC-e / Cupom)
 
-Quem desenha o cupom/nota é sempre o Controller Machine
-(`devices/printer_fiscal.py::render_danfe_nfce`) — o Simple ERP só manda
-dados da venda (itens, totais, atendente, PDV...), nunca layout. Editar o
-dispositivo do tipo "Impressora fiscal (DANFE)" na GUI (Windows) abre a
-seção "Modelo de impressão":
+Quem *desenha* os bytes do cupom/nota (ESC/POS, quebra de linha, QR Code)
+continua sendo o Controller Machine (`devices/printer_fiscal.py::render_danfe_nfce`)
+— tem que ser aqui, é quem fala com a impressora física. Mas quem *decide*
+o layout (mostrar/ocultar IE, título do cupom, mensagem padrão da empresa,
+nome do caixa/PDV, fonte condensada, QR Code, e no cupom até a composição
+por blocos) é sempre de quem embutiu o `server/` (Simple ERP ou qualquer
+outro sistema): o Controller Machine nunca edita isso localmente, só
+recebe por push (job `set_template`, mandado via
+`server/connector.py::send_template_update(...)` ou
+`server/server.py::Server.push_template(...)`) e guarda em cache em
+`device["settings"]["template"]` no `config.json` — só pra continuar
+imprimindo se a conexão cair, nunca como fonte de verdade. Não tem GUI nem
+edição local pra layout de propósito.
 
-- **Modo Básico**: mostrar/ocultar IE, título do cupom, mensagem padrão da
-  empresa, tamanho/correção de erro do QR Code — qualquer usuário Admin,
-  sempre dentro da estrutura fixa da NFC-e.
-- **Modo Avançado** (botão "Modo Avançado (cupom)...", com aviso de
-  confirmação — reservado à equipe Thenorian, toda alteração é logada em
-  `logs/`): editor de blocos livre, reordena/adiciona/remove — mas **só
-  vale pro cupom**. A trava é estrutural, não é validação: o renderer só lê
-  `blocos_customizados` quando `tipo_documento="cupom"`, e o vocabulário de
-  blocos (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`) não tem QR
-  Code/chave de acesso/protocolo como opção — não tem como um template mal
-  configurado (nem editado à mão no `config.json`) tirar campo obrigatório
-  de uma nota fiscal real.
-- **Exportar/Importar modelo**: baixa/sobe o `template` inteiro como
-  `.json` — configura uma impressora certa e replica pras outras sem
-  reconfigurar campo por campo.
+Mudou uma regra fiscal ou o leiaute da nota? Um `push_template`/
+`send_template_update` por controller da empresa (loop simples do lado de
+quem integrou) — nunca ida loja por loja reconfigurar dispositivo por
+dispositivo.
 
-Tudo fica em `device["settings"]["template"]` no `config.json` local — sem
-Linux (sem GUI ainda), editar essa chave direto no arquivo, mesmo padrão
-do resto das configurações.
+Campos aceitos no `template` (ver `DEFAULT_TEMPLATE` em `printer_fiscal.py`):
+`header_text`/`footer_text`/`mensagem_empresa` (texto livre, aceitam
+placeholder `{{campo}}` e repetição `{"x"*N}` — ver `devices/template_text.py`
+pro motor e `printer_fiscal.py::_contexto_template` pra lista de campos
+disponíveis), `mostrar_ie`, `qr_module_size`/`qr_error_correction`,
+`cupom_titulo`, `pdv_label` (nome do caixa/PDV — nunca o nome do
+dispositivo de impressão), `fonte_pequena` (Font B condensada) e
+`blocos_customizados` (Modo Avançado, só cupom).
+
+O vocabulário de blocos do Modo Avançado (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`)
+continua existindo e a trava continua estrutural — o renderer só lê
+`blocos_customizados` quando `tipo_documento="cupom"`, e não tem QR
+Code/chave de acesso/protocolo como opção de bloco — não tem como um
+template mal configurado (nem um push malformado) tirar campo obrigatório
+de uma nota fiscal real.
 
 ## Instaladores (Windows / Linux)
 
