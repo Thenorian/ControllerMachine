@@ -1,9 +1,12 @@
 """
-Builder mínimo de comandos ESC/POS — só o subconjunto padrão (init, texto,
-alinhamento, negrito, fonte, corte) que praticamente toda impressora térmica
-de cupom entende, independente de marca. Não é um driver completo: não cobre
-código de barras, imagem ou comandos proprietários de fabricante — se
-precisar disso no futuro, é aqui que entra.
+Builder de comandos ESC/POS — o subconjunto padrão (init, texto,
+alinhamento, negrito/sublinhado/invertido, fonte, tamanho, corte, código de
+barras, gaveta de dinheiro) que praticamente toda impressora térmica de
+cupom entende, independente de marca. Não modela imagem/bitmap (dado
+binário grande, fora do escopo de um template de texto) — pra qualquer
+comando não coberto por nome (proprietário de fabricante ou raro o
+suficiente pra não valer um método próprio), `raw()` aceita bytes crus
+direto.
 """
 from __future__ import annotations
 
@@ -49,6 +52,10 @@ ALIGN_CENTER = ESC + b"a" + b"\x01"
 ALIGN_RIGHT = ESC + b"a" + b"\x02"
 BOLD_ON = ESC + b"E" + b"\x01"
 BOLD_OFF = ESC + b"E" + b"\x00"
+UNDERLINE_ON = ESC + b"-" + b"\x01"
+UNDERLINE_OFF = ESC + b"-" + b"\x00"
+INVERT_ON = GS + b"B" + b"\x01"    # video reverso (texto claro em fundo escuro)
+INVERT_OFF = GS + b"B" + b"\x00"
 FONT_A = ESC + b"M" + b"\x00"  # fonte padrao (maior)
 FONT_B = ESC + b"M" + b"\x01"  # fonte condensada (menor, mais estreita)
 CUT_FULL = GS + b"V" + b"\x00"
@@ -56,6 +63,15 @@ CUT_PARTIAL = GS + b"V" + b"\x01"
 LINE_FEED = b"\n"
 
 QR_ERROR_LEVELS = {"L": 0x30, "M": 0x31, "Q": 0x32, "H": 0x33}
+
+# GS k "função B" (m >= 65) — aceita comprimento de dado explícito em vez de
+# terminador NUL, cobre a esmagadora maioria das simbologias 1D usadas em
+# cupom fiscal/comercial.
+BARCODE_SYMBOLOGIES = {
+    "upc_a": 65, "upc_e": 66, "ean13": 67, "ean8": 68, "code39": 69,
+    "itf": 70, "codabar": 71, "code93": 72, "code128": 73,
+}
+BARCODE_HRI = {"none": 0, "above": 1, "below": 2, "both": 3}
 
 
 def format_brl(value: float) -> str:
@@ -118,8 +134,83 @@ class EscPosBuilder:
         self._buffer += FONT_B if small else FONT_A
         return self
 
+    def underline(self, on: bool) -> "EscPosBuilder":
+        if self.plain:
+            return self
+        self._buffer += UNDERLINE_ON if on else UNDERLINE_OFF
+        return self
+
+    def invert(self, on: bool) -> "EscPosBuilder":
+        """Video reverso (texto claro em fundo escuro) — só pra destacar um
+        trecho curto (ex.: "VALOR A PAGAR"); a maioria das impressoras
+        desenha isso pixel a pixel, então sai mais lento que texto normal."""
+        if self.plain:
+            return self
+        self._buffer += INVERT_ON if on else INVERT_OFF
+        return self
+
+    def size(self, width: int = 1, height: int = 1) -> "EscPosBuilder":
+        """Multiplicador de tamanho do caractere, 1x a 8x em cada eixo (GS !)
+        — width=height=1 é o tamanho normal. Não confundir com font(): isso
+        amplia visualmente o caractere da fonte atual, não troca pra uma
+        fonte mais estreita/condensada."""
+        if self.plain:
+            return self
+        width = max(1, min(8, width))
+        height = max(1, min(8, height))
+        self._buffer += GS + b"!" + bytes([((width - 1) << 4) | (height - 1)])
+        return self
+
     def separator(self, char: str = "-", width: int = 42) -> "EscPosBuilder":
         return self.line(char * width)
+
+    def barcode(self, data: str, symbology: str = "code128", height: int = 60,
+                module_width: int = 2, hri: str = "below") -> "EscPosBuilder":
+        """Código de barras 1D via GS k (ver BARCODE_SYMBOLOGIES pras opções
+        aceitas). Em modo plain, imprime o dado como texto em vez de mandar
+        bytes binários que a impressora genérica não vai reconhecer (mesma
+        lógica do qr_code)."""
+        if self.plain:
+            return self.line(data)
+        try:
+            m = BARCODE_SYMBOLOGIES[symbology]
+        except KeyError:
+            raise ValueError(
+                f"simbologia de código de barras desconhecida: {symbology!r} "
+                f"(use {sorted(BARCODE_SYMBOLOGIES)})"
+            )
+
+        self._buffer += GS + b"H" + bytes([BARCODE_HRI.get(hri, 2)])
+        self._buffer += GS + b"h" + bytes([max(1, min(255, height))])
+        self._buffer += GS + b"w" + bytes([max(2, min(6, module_width))])
+        payload = data.encode("ascii", errors="ignore")
+        self._buffer += GS + b"k" + bytes([m, len(payload)]) + payload
+        return self
+
+    def cash_drawer_kick(self, pin: int = 0, on_ms: int = 25, off_ms: int = 250) -> "EscPosBuilder":
+        """Pulso pra abrir a gaveta de dinheiro ligada na impressora (ESC p)
+        — pin: 0 ou 1, qual dos dois conectores (varia por instalação física,
+        não por marca). on_ms/off_ms são convertidos pra unidades de 2ms
+        (0-255 cada, valores fora disso são truncados)."""
+        if self.plain:
+            return self
+        self._buffer += ESC + b"p" + bytes([
+            0 if pin == 0 else 1,
+            max(0, min(255, on_ms // 2)),
+            max(0, min(255, off_ms // 2)),
+        ])
+        return self
+
+    def raw(self, data: bytes) -> "EscPosBuilder":
+        """Válvula de escape: qualquer sequência ESC/POS (padrão ou
+        proprietária de fabricante) que este builder ainda não modele por
+        nome, direto em bytes — mesmo tratamento de modo plain que os
+        outros comandos de controle (ignorado, nunca vai pro papel como
+        lixo binário)."""
+        if self.plain:
+            return self
+        self._buffer += data
+        return self
 
     def qr_code(self, data: str, module_size: int = 6, error_correction: str = "M") -> "EscPosBuilder":
         """QR Code 2D real via GS ( k — extensão de fato criada pela Epson,

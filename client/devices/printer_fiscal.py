@@ -60,6 +60,8 @@ caractere — ver devices/template_text.py.
 """
 from __future__ import annotations
 
+import base64
+
 from devices.escpos import EscPosBuilder, chars_per_line, format_brl
 from devices.template_text import renderizar as renderizar_template_texto
 
@@ -71,14 +73,20 @@ TEXTO_CONTINGENCIA = ("EMITIDA EM CONTINGENCIA", "Pendente de autorizacao")
 # o padrão de fábrica.
 DEFAULT_TEMPLATE = {
     "header_text": "",
+    "header_bold": False,
+    "header_align": "center",
     "footer_text": "",
+    "footer_bold": False,
+    "footer_align": "center",
     "mostrar_ie": True,
     "mensagem_empresa": "",       # fallback fixo se a venda não trouxer mensagem_empresa própria
+    "mensagem_empresa_bold": False,
+    "mensagem_empresa_align": "left",
     "qr_module_size": 6,
     "qr_error_correction": "M",
     "cupom_titulo": "CUPOM - SEM VALOR FISCAL",
     "pdv_label": "",       # nome do caixa/PDV - nunca o nome do dispositivo de impressão
-    "fonte_pequena": False,  # Font B (ESC/POS) - condensada, cabe mais texto na mesma bobina
+    "fonte_pequena": True,  # Font B (ESC/POS) - condensada por padrão, economiza bobina
     # Modo Avançado (só cupom). Lista de blocos que SUBSTITUI o documento
     # padrão inteiro quando presente. IMPORTANTE: nota fiscal
     # (tipo_documento="nfce") NUNCA lê esta chave — a trava não é validação,
@@ -91,10 +99,15 @@ DEFAULT_TEMPLATE = {
 # Vocabulário de blocos do Modo Avançado — de propósito NÃO existe bloco de
 # QR Code, chave de acesso, protocolo, número ou série: essas peças são
 # exclusivas do fluxo fiscal fixo, nem aparecem como opção pra montar um
-# cupom customizado.
+# cupom customizado. "codigo_barras"/"abrir_gaveta"/"raw" existem pra dar
+# acesso a qualquer comando ESC/POS que o builder não modele por um bloco
+# dedicado (ver devices/escpos.py) — "raw" é a válvula de escape final,
+# bytes crus em base64, pensada pra quem sabe exatamente que sequência
+# quer mandar (comando proprietário de fabricante, por exemplo).
 TIPOS_BLOCO_VALIDOS = {
     "cabecalho", "atendente", "itens", "totais", "pagamentos", "consumidor",
     "mensagem_empresa", "mensagem_fisco", "texto", "separador", "espaco",
+    "codigo_barras", "abrir_gaveta", "raw",
 }
 
 
@@ -144,9 +157,13 @@ def _renderizar_documento_padrao(b: EscPosBuilder, payload: dict, tpl: dict, is_
     contexto = _contexto_template(payload, tpl)
 
     if tpl["header_text"]:
-        b.align("center")
+        b.align(tpl.get("header_align", "center"))
+        if tpl.get("header_bold"):
+            b.bold(True)
         for line in renderizar_template_texto(tpl["header_text"], contexto, dims.line_width):
             b.line(line)
+        if tpl.get("header_bold"):
+            b.bold(False)
         b.separator("-", dims.line_width)
 
     _renderizar_cabecalho(b, payload, tpl, is_cupom, contingencia, dims.line_width)
@@ -166,9 +183,13 @@ def _renderizar_documento_padrao(b: EscPosBuilder, payload: dict, tpl: dict, is_
 
     if tpl["footer_text"]:
         b.separator("-", dims.line_width)
-        b.align("center")
+        b.align(tpl.get("footer_align", "center"))
+        if tpl.get("footer_bold"):
+            b.bold(True)
         for line in renderizar_template_texto(tpl["footer_text"], contexto, dims.line_width):
             b.line(line)
+        if tpl.get("footer_bold"):
+            b.bold(False)
 
 
 def _renderizar_bloco(b: EscPosBuilder, bloco: dict, payload: dict, tpl: dict,
@@ -200,15 +221,45 @@ def _renderizar_bloco(b: EscPosBuilder, bloco: dict, payload: dict, tpl: dict,
         b.align(bloco.get("alinhamento", "left"))
         if bloco.get("negrito"):
             b.bold(True)
+        if bloco.get("sublinhado"):
+            b.underline(True)
+        if bloco.get("inverter"):
+            b.invert(True)
+        tamanho = bloco.get("tamanho")
+        if tamanho:
+            largura, altura = (tamanho, tamanho) if isinstance(tamanho, int) else tuple(tamanho[:2])
+            b.size(largura, altura)
         contexto = _contexto_template(payload, tpl)
         for linha in renderizar_template_texto(str(bloco.get("texto", "")), contexto, dims.line_width):
             b.line(linha)
+        if tamanho:
+            b.size(1, 1)
+        if bloco.get("inverter"):
+            b.invert(False)
+        if bloco.get("sublinhado"):
+            b.underline(False)
         if bloco.get("negrito"):
             b.bold(False)
     elif tipo == "separador":
         b.align("left").separator(str(bloco.get("caractere", "-"))[:1] or "-", dims.line_width)
     elif tipo == "espaco":
         b.feed(int(bloco.get("linhas", 1)))
+    elif tipo == "codigo_barras":
+        b.align(bloco.get("alinhamento", "center"))
+        b.barcode(
+            str(bloco.get("dados", "")),
+            symbology=bloco.get("simbologia", "code128"),
+            height=int(bloco.get("altura", 60)),
+            module_width=int(bloco.get("largura_modulo", 2)),
+            hri=bloco.get("hri", "below"),
+        )
+    elif tipo == "abrir_gaveta":
+        b.cash_drawer_kick(pin=int(bloco.get("pino", 0)))
+    elif tipo == "raw":
+        try:
+            b.raw(base64.b64decode(bloco.get("dados_base64", "")))
+        except (ValueError, TypeError):
+            pass  # base64 malformado — ignora, mesma regra de bloco inválido
 
 
 def _renderizar_cabecalho(b: EscPosBuilder, payload: dict, tpl: dict, is_cupom: bool,
@@ -343,9 +394,13 @@ def _renderizar_mensagem_empresa(b: EscPosBuilder, payload: dict, tpl: dict, con
     mensagem = payload.get("mensagem_empresa") or payload.get("mensagem_adicional") or tpl.get("mensagem_empresa")
     if mensagem:
         b.separator("-", line_width)
-        b.align("left")
+        b.align(tpl.get("mensagem_empresa_align", "left"))
+        if tpl.get("mensagem_empresa_bold"):
+            b.bold(True)
         for linha in renderizar_template_texto(mensagem, contexto, line_width):
             b.line(linha)
+        if tpl.get("mensagem_empresa_bold"):
+            b.bold(False)
 
 
 def _contexto_template(payload: dict, tpl: dict) -> dict:

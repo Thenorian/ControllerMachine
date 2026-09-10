@@ -101,21 +101,39 @@ Mudou uma regra fiscal ou o leiaute da nota? Um `push_template`/
 quem integrou) — nunca ida loja por loja reconfigurar dispositivo por
 dispositivo.
 
-Campos aceitos no `template` (ver `DEFAULT_TEMPLATE` em `printer_fiscal.py`):
+Campos aceitos no `template` (ver `DEFAULT_TEMPLATE` em `printer_fiscal.py`)
+— nenhum é obrigatório, um `template` vazio já imprime um documento
+completo e correto (todo campo ausente cai no padrão de fábrica, pensado
+pra "chegou, empurrou, já imprime" sem precisar configurar nada antes):
 `header_text`/`footer_text`/`mensagem_empresa` (texto livre, aceitam
 placeholder `{{campo}}` e repetição `{"x"*N}` — ver `devices/template_text.py`
 pro motor e `printer_fiscal.py::_contexto_template` pra lista de campos
-disponíveis), `mostrar_ie`, `qr_module_size`/`qr_error_correction`,
-`cupom_titulo`, `pdv_label` (nome do caixa/PDV — nunca o nome do
-dispositivo de impressão), `fonte_pequena` (Font B condensada) e
-`blocos_customizados` (Modo Avançado, só cupom).
+disponíveis) com `header_bold`/`header_align`, `footer_bold`/`footer_align`
+e `mensagem_empresa_bold`/`mensagem_empresa_align` pra formatar cada um,
+`mostrar_ie`, `qr_module_size`/`qr_error_correction`, `cupom_titulo`,
+`pdv_label` (nome do caixa/PDV — nunca o nome do dispositivo de
+impressão), `fonte_pequena` (Font B condensada — **padrão é `True`**,
+economiza bobina) e `blocos_customizados` (Modo Avançado, só cupom).
 
 O vocabulário de blocos do Modo Avançado (`devices/printer_fiscal.py::TIPOS_BLOCO_VALIDOS`)
 continua existindo e a trava continua estrutural — o renderer só lê
 `blocos_customizados` quando `tipo_documento="cupom"`, e não tem QR
 Code/chave de acesso/protocolo como opção de bloco — não tem como um
 template mal configurado (nem um push malformado) tirar campo obrigatório
-de uma nota fiscal real.
+de uma nota fiscal real. Além dos blocos de dado da venda (itens, totais,
+pagamentos...), tem acesso direto a mais comandos ESC/POS
+(`devices/escpos.py::EscPosBuilder`) pra quem quiser manipular o cupom
+com mais liberdade:
+
+- `texto` aceita `negrito`, `sublinhado`, `inverter` (vídeo reverso) e
+  `tamanho: [largura, altura]` (1 a 8, multiplicador de caractere).
+- `codigo_barras` — `{"dados", "simbologia", "altura", "largura_modulo", "hri"}`
+  (simbologias em `escpos.BARCODE_SYMBOLOGIES`: UPC-A/E, EAN13/8, CODE39,
+  ITF, CODABAR, CODE93, CODE128).
+- `abrir_gaveta` — pulso pra abrir a gaveta de dinheiro ligada na impressora.
+- `raw` — `{"dados_base64": "..."}`, bytes ESC/POS crus (qualquer comando
+  que o builder não modele por nome, inclusive proprietário de fabricante).
+  Base64 malformado é ignorado, mesma regra de bloco inválido.
 
 ## Instaladores (Windows / Linux)
 
