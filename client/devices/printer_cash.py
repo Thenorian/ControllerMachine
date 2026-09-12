@@ -13,22 +13,31 @@ tipo de documento e quem interpreta o payload, ver client/main.py):
 
     {
         "tipo_documento": "caixa",
-        "operacao": "abertura" | "fechamento",
+        "operacao": "abertura" | "fechamento" | "parcial" | "resumo_dia",
         "emitente": {"razao_social", "cnpj" | "cpf"},
         "terminal_label": "opcional - nome do terminal/caixa",
         "operador": "opcional - nome de quem abriu/fechou",
         "opened_at": "dd/mm/aaaa hh:mm:ss",
         "opening_balance": 0.0,
-        # só "fechamento":
-        "closed_at": "dd/mm/aaaa hh:mm:ss",
+        # "fechamento" e "parcial" ("parcial" = X report, sessão de caixa
+        # ainda aberta, sem contagem/diferença):
+        "closed_at": "dd/mm/aaaa hh:mm:ss",       # só "fechamento"
         "entradas": 0.0, "saidas": 0.0, "vendas": 0.0,
-        "expected_balance": 0.0, "counted_balance": 0.0, "difference": 0.0,
+        "expected_balance": 0.0,                   # só "fechamento"
+        "counted_balance": 0.0, "difference": 0.0, # só "fechamento"
         "payments_by_method": {"Dinheiro": 0.0, "Cartao de Credito": 0.0, ...},
+        # "resumo_dia" - empresa sem abertura/fechamento formal de caixa
+        # (require_cash_register desligada): resumo de TODAS as vendas de
+        # hoje da empresa, sem sessão/terminal/saldo de caixa físico
+        # nenhum - só sale_count/vendas/payments_by_method.
+        "sale_count": 0,
     }
 """
 from __future__ import annotations
 
 from devices.escpos import EscPosBuilder, chars_per_line, format_brl
+
+OPERACOES_VALIDAS = {"abertura", "fechamento", "parcial", "resumo_dia"}
 
 
 def render_cupom_caixa(payload: dict, encoding: str = "cp860", paper_width_mm: int = 80,
@@ -36,8 +45,8 @@ def render_cupom_caixa(payload: dict, encoding: str = "cp860", paper_width_mm: i
     for campo in ("operacao", "emitente"):
         if campo not in payload:
             raise ValueError(f"payload de cupom de caixa incompleto - falta '{campo}'")
-    if payload["operacao"] not in ("abertura", "fechamento"):
-        raise ValueError("payload de cupom de caixa invalido - 'operacao' deve ser 'abertura' ou 'fechamento'")
+    if payload["operacao"] not in OPERACOES_VALIDAS:
+        raise ValueError(f"payload de cupom de caixa invalido - 'operacao' deve ser um de {sorted(OPERACOES_VALIDAS)}")
 
     line_width = chars_per_line(paper_width_mm, fonte_pequena=False)
     left_col = line_width - 10
@@ -55,7 +64,12 @@ def render_cupom_caixa(payload: dict, encoding: str = "cp860", paper_width_mm: i
     if documento:
         b.line(documento)
     b.separator("=", line_width)
-    titulo = "ABERTURA DE CAIXA" if payload["operacao"] == "abertura" else "FECHAMENTO DE CAIXA"
+    titulo = {
+        "abertura": "ABERTURA DE CAIXA",
+        "fechamento": "FECHAMENTO DE CAIXA",
+        "parcial": "RESUMO PARCIAL DE CAIXA",
+        "resumo_dia": "RESUMO DE VENDAS DO DIA",
+    }[payload["operacao"]]
     b.bold(True).line(titulo).bold(False)
     b.separator("-", line_width)
 
@@ -70,7 +84,27 @@ def render_cupom_caixa(payload: dict, encoding: str = "cp860", paper_width_mm: i
     if payload["operacao"] == "abertura":
         b.separator("-", line_width)
         b.line(f"{'Valor de abertura R$':<{left_col}}{format_brl(payload.get('opening_balance', 0)):>{value_col}}")
+
+    elif payload["operacao"] == "resumo_dia":
+        # Sem sessão de caixa nenhuma pra amarrar (empresa não usa
+        # abertura/fechamento formal) - só o total vendido hoje, sem
+        # nenhuma linha de saldo/conferência de caixa físico.
+        b.separator("-", line_width)
+        b.line(f"{'Vendas realizadas':<{left_col}}{payload.get('sale_count', 0):>{value_col}}")
+        b.line(f"{'Total vendido R$':<{left_col}}{format_brl(payload.get('vendas', 0)):>{value_col}}")
+
+        payments = payload.get("payments_by_method") or {}
+        if payments:
+            b.separator("-", line_width)
+            b.line("Vendas por forma de pagamento:")
+            for forma, valor in payments.items():
+                b.line(f"{forma:<{left_col}}{format_brl(valor):>{value_col}}")
+
     else:
+        # "fechamento" e "parcial" - mesmo corpo (saldo de caixa físico +
+        # vendas por forma de pagamento); só "fechamento" acrescenta a
+        # conferência (valor contado/diferença), porque "parcial" é um X
+        # report com o caixa ainda aberto, sem ninguém ter contado nada.
         if payload.get("closed_at"):
             b.line(f"Fechamento: {payload['closed_at']}")
         b.separator("-", line_width)
@@ -88,9 +122,10 @@ def render_cupom_caixa(payload: dict, encoding: str = "cp860", paper_width_mm: i
 
         b.separator("-", line_width)
         b.bold(True).line(f"{'Valor esperado R$':<{left_col}}{format_brl(payload.get('expected_balance', 0)):>{value_col}}").bold(False)
-        b.line(f"{'Valor contado R$':<{left_col}}{format_brl(payload.get('counted_balance', 0)):>{value_col}}")
-        diferenca = payload.get('difference', 0)
-        b.bold(True).line(f"{'Diferenca R$':<{left_col}}{format_brl(diferenca):>{value_col}}").bold(False)
+        if payload["operacao"] == "fechamento":
+            b.line(f"{'Valor contado R$':<{left_col}}{format_brl(payload.get('counted_balance', 0)):>{value_col}}")
+            diferenca = payload.get('difference', 0)
+            b.bold(True).line(f"{'Diferenca R$':<{left_col}}{format_brl(diferenca):>{value_col}}").bold(False)
 
     b.separator("=", line_width)
     b.align("center").line("Comprovante interno - sem valor fiscal")
