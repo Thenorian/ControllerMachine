@@ -285,6 +285,10 @@ def _renderizar_cabecalho(b: EscPosBuilder, payload: dict, tpl: dict, is_cupom: 
     b.separator("=", line_width)
     if is_cupom:
         b.line(tpl["cupom_titulo"])
+        # Cupom não passa por _renderizar_divisao_fiscal (exclusiva de nota
+        # fiscal) - é o único lugar que imprime data_emissao pra ele.
+        if payload.get("data_emissao"):
+            b.line(payload["data_emissao"])
     else:
         b.line("DANFE NFC-e - Documento Auxiliar da")
         b.line("Nota Fiscal de Consumidor Eletronica")
