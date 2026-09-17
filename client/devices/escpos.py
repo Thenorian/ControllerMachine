@@ -58,6 +58,12 @@ INVERT_ON = GS + b"B" + b"\x01"    # video reverso (texto claro em fundo escuro)
 INVERT_OFF = GS + b"B" + b"\x00"
 FONT_A = ESC + b"M" + b"\x00"  # fonte padrao (maior)
 FONT_B = ESC + b"M" + b"\x01"  # fonte condensada (menor, mais estreita)
+LINE_SPACING_DEFAULT = ESC + b"2"  # entrelinha de fabrica da impressora (ESC 2, sem parametro)
+# ESC M (fonte) só muda a LARGURA do caractere - a ALTURA de cada linha
+# (entrelinha) é um comando separado (ESC 3 n), nunca emitido aqui antes
+# (2026-09-16). n é em dots (180dpi tipico -> n=30 fica perto do default de
+# fabrica da maioria das Epson-compativeis, n=24 é visivelmente mais
+# compacto).
 CUT_FULL = GS + b"V" + b"\x00"
 CUT_PARTIAL = GS + b"V" + b"\x01"
 LINE_FEED = b"\n"
@@ -132,6 +138,18 @@ class EscPosBuilder:
         if self.plain:
             return self
         self._buffer += FONT_B if small else FONT_A
+        return self
+
+    def line_spacing(self, dots: int | None = None) -> "EscPosBuilder":
+        """Entrelinha (altura de cada linha) - separado de font(), que só
+        muda largura do caractere. None = ESC 2 (volta pro default de
+        fábrica); um int 0-255 = ESC 3 n (n dots, tipicamente 180dpi)."""
+        if self.plain:
+            return self
+        if dots is None:
+            self._buffer += LINE_SPACING_DEFAULT
+        else:
+            self._buffer += ESC + b"3" + bytes([max(0, min(255, dots))])
         return self
 
     def underline(self, on: bool) -> "EscPosBuilder":
