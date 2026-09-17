@@ -91,6 +91,11 @@ def _descricao_job(kind: str, job: dict) -> str:
     if kind == "print_fiscal_nfce":
         if job.get("data_type") == "pdf":
             return "Impressão de DANFE (PDF já pronto)"
+        if job.get("data_type") == "escpos":
+            # Simple ERP já manda o buffer ESC/POS pronto pra NFC-e (ver
+            # util/printer_fiscal.py de lá) - só esse tipo de documento usa
+            # esse caminho hoje, cupom/caixa continuam renderizando aqui.
+            return "Impressão de documento fiscal NFC-e"
         tipo_doc = (job.get("data") or {}).get("tipo_documento", "nfce")
         return _DESCRICAO_FISCAL.get(tipo_doc, "Impressão fiscal")
     return _DESCRICAO_JOB.get(kind, kind)
@@ -99,9 +104,9 @@ def _descricao_job(kind: str, job: dict) -> str:
 def _job_tipo_documento(kind: str, job: dict) -> str | None:
     """"nfce"/"cupom"/"caixa" pro job fiscal (vem do próprio payload da
     venda) — None pra impressão comum/balança (não carregam esse conceito)
-    e pro fiscal já vindo pronto em PDF (job["data"] é base64, não o
-    payload)."""
-    if kind != "print_fiscal_nfce" or job.get("data_type") == "pdf":
+    e pro fiscal já vindo pronto em PDF ou ESC/POS (job["data"] é base64,
+    não o payload)."""
+    if kind != "print_fiscal_nfce" or job.get("data_type") in ("pdf", "escpos"):
         return None
     return (job.get("data") or {}).get("tipo_documento")
 
@@ -148,10 +153,15 @@ def _salvar_pdf_em_pasta(device: dict, connection: dict, data: bytes, job_id: st
 def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
     connection = device["connection"]
     is_pdf = job.get("data_type") == "pdf"
+    is_escpos_prerenderizado = job.get("data_type") == "escpos"
 
-    if is_pdf:
-        # Simple ERP (ou o provedor de NFC-e) já manda o DANFE pronto em
-        # PDF — não tem o que renderizar aqui, só entregar.
+    if is_pdf or is_escpos_prerenderizado:
+        # Simple ERP já manda o documento pronto - PDF (provedor de NF-e)
+        # ou ESC/POS já montado pra NFC-e (ver util/printer_fiscal.py do
+        # lado do Simple ERP, 2026-09-16) - não tem o que renderizar aqui,
+        # só entregar. Layout de NFC-e não é mais decidido neste app (ver
+        # devices/printer_fiscal.py, que só continua existindo pro Modo
+        # Avançado de cupom não fiscal).
         data = base64.b64decode(job["data"])
     elif (job.get("data") or {}).get("tipo_documento") == "caixa":
         # Cupom de abertura/fechamento de caixa - documento interno, nunca
@@ -189,7 +199,7 @@ def _dispatch_fiscal(device: dict, job: dict, ask_folder=None) -> None:
         if is_pdf:
             printer_common.print_pdf(connection, data)
         else:
-            printer_common.print_raw(connection, data)
+            printer_common.print_raw(connection, data)  # cobre ESC/POS pré-renderizado e o legado
     elif connection["kind"] == "tcp":
         printer_common.print_via_tcp(connection, data)
     else:

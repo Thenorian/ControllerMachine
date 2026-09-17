@@ -1,4 +1,11 @@
 """
+Cópia de client/devices/escpos.py — o builder de baixo nível é o mesmo dos
+dois lados (protocolo ESC/POS não muda), só o RENDERER de NFC-e
+(printer_fiscal.py) virou exclusivo daqui (ver docstring do módulo
+irmão). Mudou algo no protocolo em si (comando novo, símbolo de código de
+barras etc)? Copiar pros dois lugares — sem import cruzado entre client/
+e server/ de propósito, são dois apps deployados separados.
+
 Builder de comandos ESC/POS — o subconjunto padrão (init, texto,
 alinhamento, negrito/sublinhado/invertido, fonte, tamanho, corte, código de
 barras, gaveta de dinheiro) que praticamente toda impressora térmica de
@@ -60,10 +67,13 @@ FONT_A = ESC + b"M" + b"\x00"  # fonte padrao (maior)
 FONT_B = ESC + b"M" + b"\x01"  # fonte condensada (menor, mais estreita)
 LINE_SPACING_DEFAULT = ESC + b"2"  # entrelinha de fabrica da impressora (ESC 2, sem parametro)
 # ESC M (fonte) só muda a LARGURA do caractere - a ALTURA de cada linha
-# (entrelinha) é um comando separado (ESC 3 n), nunca emitido aqui antes
-# (2026-09-16). n é em dots (180dpi tipico -> n=30 fica perto do default de
+# (entrelinha) é um comando totalmente separado (ESC 3 n) que nunca era
+# emitido aqui antes (2026-09-16): documento inteiro ficava sempre na
+# entrelinha de fábrica da impressora, ainda que a fonte fosse trocada pra
+# B. n é em dots (tipicamente 180dpi -> n=30 é bem perto do default de
 # fabrica da maioria das Epson-compativeis, n=24 é visivelmente mais
-# compacto).
+# compacto). Ajustar aqui se um equipamento especifico apertar demais/de
+# menos as linhas.
 CUT_FULL = GS + b"V" + b"\x00"
 CUT_PARTIAL = GS + b"V" + b"\x01"
 LINE_FEED = b"\n"
@@ -143,7 +153,8 @@ class EscPosBuilder:
     def line_spacing(self, dots: int | None = None) -> "EscPosBuilder":
         """Entrelinha (altura de cada linha) - separado de font(), que só
         muda largura do caractere. None = ESC 2 (volta pro default de
-        fábrica); um int 0-255 = ESC 3 n (n dots, tipicamente 180dpi)."""
+        fábrica da impressora); um int 0-255 = ESC 3 n (n dots, tipicamente
+        180dpi). Ver LINE_SPACING_DEFAULT acima pra por que isso existe."""
         if self.plain:
             return self
         if dots is None:
