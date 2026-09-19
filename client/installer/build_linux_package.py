@@ -24,6 +24,8 @@ INCLUDE_FILES = [
     "transport.py",
     "service_linux.py",
     "logging_setup.py",
+    "version.py",
+    "updater.py",
 ]
 INCLUDE_DIRS = ["devices"]
 

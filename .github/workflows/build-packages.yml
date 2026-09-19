@@ -21,6 +21,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Confere se version.py bate com a tag da release
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          TAG_NUM="${GITHUB_REF_NAME#v}"
+          VERSAO=$(python -c "from version import __version__; print(__version__)")
+          if [ "$VERSAO" != "$TAG_NUM" ]; then
+            echo "::error::client/version.py está em '$VERSAO', mas a tag da release é '$GITHUB_REF_NAME' - atualize version.py (updater.py compara isso pra saber se tem versão nova) antes de taguear."
+            exit 1
+          fi
+
       - name: Instala dependências
         run: |
           pip install -r requirements-client.txt
@@ -61,6 +72,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Confere se version.py bate com a tag da release
+        if: github.event_name == 'release'
+        run: |
+          TAG_NUM="${GITHUB_REF_NAME#v}"
+          VERSAO=$(python3 -c "from version import __version__; print(__version__)")
+          if [ "$VERSAO" != "$TAG_NUM" ]; then
+            echo "::error::client/version.py está em '$VERSAO', mas a tag da release é '$GITHUB_REF_NAME' - atualize version.py (updater.py compara isso pra saber se tem versão nova) antes de taguear."
+            exit 1
+          fi
 
       - name: Gera o pacote Linux (.tar.gz)
         run: python3 installer/build_linux_package.py
