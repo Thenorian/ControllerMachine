@@ -102,9 +102,6 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: in
     _totais(b, payload["totais"], larguras)
     _pagamentos(b, payload, larguras.b)
 
-    b.align("left").separator("-", larguras.b)
-    b.line(_linha_consumidor(payload.get("consumidor") or {})[:larguras.b])
-
     _bloco_fiscal_e_qr(b, payload, larguras.b, contingencia, tpl)
     _mensagem_empresa(b, payload, tpl, larguras.b)
 
@@ -315,10 +312,18 @@ def _bloco_fiscal_e_qr(b: EscPosBuilder, payload: dict, largura: int, contingenc
     if payload.get("via") == 2:
         b.bold(True).line("Via do Estabelecimento").bold(False)
 
-    # QR abaixo do bloco de texto, centralizado, comando nativo (GS ( k) -
-    # em ESC/POS não dá pra colocar texto e QR lado a lado (impressora
-    # imprime linha a linha); ver docstring do módulo pra outras opções
-    # consideradas e por que essa foi a escolhida.
+    # Consumidor colado no QR (pedido explícito: "igual ao modelo da outra
+    # empresa concorrente, onde o CPF fica ao lado do QR code") - ESC/POS
+    # imprime linha a linha, então não dá pra ficar literalmente ao LADO
+    # (isso exigiria montar um bitmap raster com GS v 0, bem mais pesado e
+    # lento, e nem toda impressora suporta direito - ver docstring do
+    # módulo). O mais perto que dá pra chegar sem isso é imprimir a linha
+    # imediatamente antes do QR, sempre no mesmo lugar (identificado ou
+    # não), pra não fazer o resto do cupom pular de posição dependendo da
+    # venda ter cliente vinculado ou não.
+    b.line(_linha_consumidor(payload.get("consumidor") or {})[:largura])
+
+    # QR abaixo do bloco de texto, centralizado, comando nativo (GS ( k).
     if payload.get("qrcode_url"):
         b.feed(1)
         b.qr_code(payload["qrcode_url"], module_size=tpl["qr_module_size"],
