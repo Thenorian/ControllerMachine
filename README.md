@@ -28,6 +28,21 @@ contribuir com este repositório.
   na bandeja + janela de cadastro. Linux: serviço systemd (`python main.py
   --install-service`).
 
+### Auto-atualização (`client/updater.py`)
+
+Uma instalação real de `client/` (não um checkout de desenvolvimento) confere
+sozinha, ao iniciar e a cada 1h, se existe uma [release](../../releases) mais
+nova que a instalada e, se tiver, baixa, instala por cima e reinicia sozinho
+— sem precisar de ninguém mexendo máquina por máquina nas lojas. Só olha
+para releases publicadas (nunca draft/pre-release) e nunca roda em cima de
+um `git clone` (detecta isso e fica inerte).
+
+**Publicando uma release nova:** atualizar `__version__` em `client/version.py`
+(commit próprio) antes de criar a tag/release `vX.Y` no GitHub — o CI
+(`.github/workflows/build-packages.yml`) confere que os dois batem e falha o
+build se esquecer. É a partir dessa tag que o `updater.py` de cada instalação
+decide se existe algo mais novo pra baixar.
+
 ## Testar localmente (sem o Simple ERP de verdade)
 
 Terminal 1 — sobe um connector de teste:

@@ -17,6 +17,7 @@ import platform
 import sys
 
 import print_history
+import updater
 from catalog import DeviceCatalog
 from devices import printer_common, printer_fiscal, printer_cash
 from devices.scale import get_formatter
@@ -255,7 +256,13 @@ def run_linux(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
     )
     try:
         while True:
-            __import__("time").sleep(3600)
+            # Checa update logo ao (re)iniciar e depois a cada hora - se
+            # achar uma versão nova, updater já baixa, instala e reinicia
+            # sozinho (systemd Restart=on-failure, ou subprocess detached
+            # fora do systemd) - só precisa parar de rodar este processo.
+            if updater.verificar_e_atualizar():
+                return
+            __import__("time").sleep(updater.CHECK_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         transport.stop()
 
@@ -280,7 +287,28 @@ def run_windows(catalog: DeviceCatalog, transport: ControllerTransport, ask_fold
     else:
         window.protocol("WM_DELETE_WINDOW", lambda: (transport.stop(), window.destroy()))
 
+    _agendar_verificacao_de_atualizacao(window)
     window.mainloop()
+
+
+def _agendar_verificacao_de_atualizacao(window) -> None:
+    """Tkinter não tem "sleep em loop" (é single-thread, bloquear travaria a
+    janela/bandeja) - `.after()` agenda a checagem sem travar nada. Primeira
+    checagem logo no início (pequeno atraso só pra não competir com a
+    janela terminando de montar), depois a cada hora. Se achar atualização,
+    o updater já disparou o .bat que troca o .exe e reabre - só falta sair
+    (window.quit devolve o controle depois de mainloop(), main() termina e
+    o processo libera o arquivo pro .bat copiar por cima)."""
+    def checar():
+        try:
+            if updater.verificar_e_atualizar():
+                window.quit()
+                return
+        except Exception:
+            logger.exception("Falha checando atualização")
+        window.after(updater.CHECK_INTERVAL_SECONDS * 1000, checar)
+
+    window.after(2000, checar)
 
 
 def main() -> None:
