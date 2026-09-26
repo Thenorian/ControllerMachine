@@ -8,7 +8,7 @@ plataforma atual, instala por cima da instalação existente e reinicia
 sozinho - sem intervenção do operador da loja.
 
 Só roda de verdade quando a instalação é "real" (ver
-_rodando_de_instalacao_real) - nunca em cima do worktree de quem está
+esta_em_instalacao_real) - nunca em cima do worktree de quem está
 desenvolvendo (senão um `git status` viraria uma bagunça de arquivo
 baixado por cima de arquivo versionado).
 
@@ -54,7 +54,7 @@ def _parse_version(versao: str) -> tuple[int, ...]:
     return tuple(partes) or (0,)
 
 
-def _rodando_de_instalacao_real() -> bool:
+def esta_em_instalacao_real() -> bool:
     """Windows: só quando compilado (PyInstaller), nunca rodando
     `python main.py` direto em dev. Linux (nunca "frozen", roda sempre
     fonte Python puro - ver build_linux_package.py): considera instalação
@@ -97,14 +97,40 @@ def _baixar_asset(assets: list[dict], nome: str, destino: Path) -> bool:
     return destino.exists() and destino.stat().st_size > 0
 
 
-def verificar_e_atualizar() -> bool:
+def versao_mais_nova(tag: str) -> bool:
+    """True quando a tag de uma release é mais nova que a versão instalada
+    (version.py) - mesma comparação numérica usada em verificar_e_atualizar,
+    exposta à parte pra quem só quer checar sem baixar nada (ver
+    consultar_ultima_release / aba Configurações da GUI)."""
+    return _parse_version(tag) > _parse_version(__version__)
+
+
+def consultar_ultima_release() -> dict | None:
+    """Só consulta a API do GitHub (não baixa nem instala nada) - usado pela
+    aba Configurações pra mostrar se há atualização disponível sem disparar
+    o download. None = não deu pra consultar (sem internet, etc.) ou a
+    release mais recente é rascunho/pré-lançamento."""
+    release = _buscar_release_mais_recente()
+    if not release or release.get("draft") or release.get("prerelease"):
+        return None
+    return release
+
+
+def verificar_e_atualizar(forcar: bool = False) -> bool:
     """Devolve True quando uma atualização foi baixada e a troca/reinício já
     foi disparada - quem chamou deve parar o que estiver fazendo e deixar
     o processo terminar (o processo novo assume a partir daí). False =
     nada a fazer (já na última versão, ou alguma etapa falhou) - continua
-    rodando normalmente."""
+    rodando normalmente.
+
+    forcar=True (botão "Forçar atualização" da aba Configurações) pula a
+    comparação de versão e reinstala a última release mesmo que já seja a
+    versão instalada - útil pra reparar uma instalação corrompida sem
+    esperar sair uma versão nova. Ainda respeita esta_em_instalacao_real()
+    (nunca escreve por cima do worktree de quem desenvolve) e nunca baixa
+    rascunho/pré-lançamento."""
     try:
-        if not _rodando_de_instalacao_real():
+        if not esta_em_instalacao_real():
             return False
 
         release = _buscar_release_mais_recente()
@@ -112,7 +138,7 @@ def verificar_e_atualizar() -> bool:
             return False
 
         versao_remota = release.get("tag_name", "")
-        if _parse_version(versao_remota) <= _parse_version(__version__):
+        if not forcar and _parse_version(versao_remota) <= _parse_version(__version__):
             return False
 
         logger.info(f"Nova versão disponível: {versao_remota} (atual: v{__version__}) - baixando...")
