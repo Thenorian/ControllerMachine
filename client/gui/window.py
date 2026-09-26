@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import print_history
+import updater
+import version
 from catalog import DeviceCatalog
 from devices.scale import list_brands as list_scale_brands
 from discovery import discover_os_printers
@@ -118,15 +121,18 @@ class ControllerWindow(tk.Tk):
         general_tab = ttk.Frame(notebook)
         devices_tab = ttk.Frame(notebook)
         history_tab = ttk.Frame(notebook)
+        settings_tab = ttk.Frame(notebook)
         log_tab = ttk.Frame(notebook)
         notebook.add(general_tab, text="Geral")
         notebook.add(devices_tab, text="Dispositivos")
         notebook.add(history_tab, text="Histórico")
+        notebook.add(settings_tab, text="Configurações")
         notebook.add(log_tab, text="Log")
 
         self._build_general_tab(general_tab)
         self._build_devices_tab(devices_tab)
         self._build_history_tab(history_tab)
+        self._build_settings_tab(settings_tab)
         self._build_log_tab(log_tab)
         self._refresh_devices()
         self._poll_status()
@@ -286,6 +292,122 @@ class ControllerWindow(tk.Tk):
     def _poll_history(self) -> None:
         self._refresh_history()
         self.after(5000, self._poll_history)
+
+    # ------------------------------------------------------------------ #
+    # Aba Configurações — versão instalada e atualização (ver updater.py).
+    # "Verificar agora" só consulta a release mais recente no GitHub (não
+    # baixa nada); "Forçar atualização" dispara o mesmo fluxo do checador
+    # automático de hora em hora, mas pulando a comparação de versão — serve
+    # tanto pra não esperar o próximo ciclo quanto pra reinstalar por cima
+    # de uma instalação corrompida. As duas rodam em thread separada (rede
+    # bloquearia a janela inteira) e voltam pro Tk via self.after(0, ...).
+    # ------------------------------------------------------------------ #
+
+    def _build_settings_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=10)
+        LABEL_WIDTH = 16
+
+        update_frame = ttk.LabelFrame(parent, text="Atualização", padding=8)
+        update_frame.pack(fill="x")
+
+        ttk.Label(update_frame, text="Versão instalada:", width=LABEL_WIDTH).grid(
+            row=0, column=0, sticky="w", pady=2)
+        ttk.Label(update_frame, text=f"v{version.__version__}").grid(row=0, column=1, sticky="w", pady=2)
+
+        ambiente_texto = (
+            "Instalação real — atualização automática ativa" if updater.esta_em_instalacao_real()
+            else "Ambiente de desenvolvimento — atualização automática desligada de propósito"
+        )
+        ttk.Label(update_frame, text="Ambiente:", width=LABEL_WIDTH).grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Label(update_frame, text=ambiente_texto, wraplength=280).grid(row=1, column=1, sticky="w", pady=2)
+
+        ttk.Label(update_frame, text="Status:", width=LABEL_WIDTH).grid(row=2, column=0, sticky="w", pady=(8, 2))
+        self.update_status_label = ttk.Label(update_frame, text="Ainda não verificado nesta sessão.",
+                                              wraplength=280)
+        self.update_status_label.grid(row=2, column=1, sticky="w", pady=(8, 2))
+
+        buttons = ttk.Frame(update_frame)
+        buttons.grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.check_update_btn = ttk.Button(buttons, text="Verificar agora", command=self._check_for_updates)
+        self.check_update_btn.pack(side="left")
+        self.force_update_btn = ttk.Button(buttons, text="Forçar atualização", command=self._force_update)
+        self.force_update_btn.pack(side="left", padx=(6, 0))
+
+    def _check_for_updates(self) -> None:
+        self.check_update_btn.configure(state="disabled")
+        self.update_status_label.configure(text="Verificando...", foreground="#b8860b")
+
+        def worker() -> None:
+            release = updater.consultar_ultima_release()
+            self.after(0, lambda: self._on_check_result(release))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_check_result(self, release: dict | None) -> None:
+        self.check_update_btn.configure(state="normal")
+        agora = datetime.now().strftime("%H:%M:%S")
+        if release is None:
+            self.update_status_label.configure(
+                foreground="#c0392b",
+                text=f"Não foi possível verificar ({agora}) — sem internet ou GitHub fora do ar.",
+            )
+            return
+        tag = release.get("tag_name", "?")
+        if updater.versao_mais_nova(tag):
+            self.update_status_label.configure(
+                foreground="#b8860b",
+                text=f"Nova versão disponível: {tag} (verificado às {agora}).",
+            )
+        else:
+            self.update_status_label.configure(
+                foreground="#1a7f37",
+                text=f"Você está atualizado (v{version.__version__}, verificado às {agora}).",
+            )
+
+    def _force_update(self) -> None:
+        if not updater.esta_em_instalacao_real():
+            messagebox.showinfo(
+                "Ambiente de desenvolvimento",
+                "Este ambiente não é uma instalação real (rodando a partir do código-fonte em "
+                "desenvolvimento) — a atualização automática fica desligada de propósito, pra nunca "
+                "sobrescrever o worktree de quem está desenvolvendo.",
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Forçar atualização",
+            "Isso baixa a última versão publicada no GitHub e reinicia o Controller Machine agora, "
+            "mesmo que esta máquina já esteja atualizada. Continuar?",
+        ):
+            return
+
+        self.check_update_btn.configure(state="disabled")
+        self.force_update_btn.configure(state="disabled")
+        self.update_status_label.configure(text="Baixando e instalando atualização...", foreground="#b8860b")
+
+        def worker() -> None:
+            atualizou = updater.verificar_e_atualizar(forcar=True)
+            self.after(0, lambda: self._on_force_update_result(atualizou))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_force_update_result(self, atualizou: bool) -> None:
+        if atualizou:
+            # Já disparou a troca do .exe (ver updater._atualizar_windows) -
+            # só falta sair pra soltar o arquivo; self.quit() devolve o
+            # controle depois de mainloop() (ver run_windows em main.py),
+            # que então termina o processo e libera o arquivo pro .bat trocar.
+            self.update_status_label.configure(text="Atualização instalada — reiniciando...",
+                                                foreground="#1a7f37")
+            self.after(500, self.quit)
+            return
+
+        self.check_update_btn.configure(state="normal")
+        self.force_update_btn.configure(state="normal")
+        self.update_status_label.configure(
+            foreground="#c0392b",
+            text="Não foi possível concluir a atualização (sem release disponível ou falha no download).",
+        )
 
     # ------------------------------------------------------------------ #
     # Aba Log
