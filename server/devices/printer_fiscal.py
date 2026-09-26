@@ -92,7 +92,20 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: in
     contingencia = bool(payload.get("contingencia"))
     larguras = _Larguras(paper_width_mm)
 
-    b = EscPosBuilder(encoding=encoding, plain=(mode == "raw"))
+    # mode="escpos" (o modo de verdade, produção) renderiza como IMAGEM
+    # desde 2026-09-21 (ver image_receipt.py) - texto com fonte B/entrelinha/
+    # QR Code nativos da impressora dependia de cada driver/equipamento
+    # implementar tudo igual, e quebrava na prática (cliente relatou "fonte
+    # cagada" numa Epson via driver USB do Windows). mode="raw" continua
+    # sendo o fallback de texto puro pra equipamento que nem ESC/POS binário
+    # entende (ver EscPosBuilder(plain=True) - não faz sentido mandar
+    # imagem pra esse caso, ele nem entenderia o comando GS v 0).
+    if mode == "raw":
+        b = EscPosBuilder(encoding=encoding, plain=True)
+    else:
+        from devices.image_receipt import ImageReceiptBuilder
+        b = ImageReceiptBuilder(paper_width_mm=paper_width_mm)
+
     b.font(small=True)  # Fonte B é o padrão do corpo inteiro - só 2 trechos voltam pra Fonte A (ver abaixo)
     b.line_spacing(tpl["entrelinha_dots"])  # a altura da linha é o que de fato encolhe o cupom, não a fonte
 
