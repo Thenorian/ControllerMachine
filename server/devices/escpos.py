@@ -24,7 +24,15 @@ import unicodedata
 # na mesma bobina). Números redondos usuais de mercado; se um equipamento
 # específico imprimir com fonte diferente, ajustar aqui.
 CHARS_PER_LINE = {58: 32, 80: 48}
-CHARS_PER_LINE_FONT_B = {58: 42, 80: 64}
+# 80mm reduzido de 64 (2026-09-26, pedido explícito - "tem cliente
+# cegueta") pra letra do corpo do cupom sair um pouco maior - menos
+# caractere por linha em ImageReceiptBuilder._fitted_font (mesma largura
+# física, fonte cresce pra compensar). Só a coluna DESCRICAO da tabela de
+# itens encolhe pra abrir esse espaço (ver _ColunasItens em
+# printer_fiscal.py) - por isso o corte é moderado (-4 caracteres, não
+# mais que isso). 58mm mantido igual - já é uma bobina estreita, a coluna
+# de descrição já é pequena o bastante sem apertar mais.
+CHARS_PER_LINE_FONT_B = {58: 42, 80: 60}
 
 
 def chars_per_line(paper_width_mm: int, fonte_pequena: bool = False) -> int:
@@ -267,6 +275,25 @@ class EscPosBuilder:
         self._buffer += GS + b"(k" + bytes([pL, pH]) + b"1P0" + payload  # armazena os dados
         self._buffer += GS + b"(k" + bytes([3, 0]) + b"1Q0"  # imprime o símbolo armazenado
         self._buffer += LINE_FEED
+        return self
+
+    def logo(self, image_bytes: bytes | None) -> "EscPosBuilder":
+        """No-op nesta classe - ESC/POS texto puro não desenha imagem (ver
+        docstring do módulo). Existe só pra ter a MESMA interface que
+        ImageReceiptBuilder.logo() e printer_fiscal.py poder chamar sem
+        checar qual builder está em uso."""
+        return self
+
+    def qr_with_lines(self, data: str, lines: list[str], module_size: int = 6,
+                       error_correction: str = "M") -> "EscPosBuilder":
+        """Modo texto não desenha lado a lado (protocolo é linha a linha,
+        sem posicionamento X/Y) - imprime as linhas de informação seguidas
+        do QR embaixo, como sempre foi. Layout lado a lado de verdade só
+        existe em ImageReceiptBuilder.qr_with_lines (bitmap)."""
+        for linha in lines:
+            self.line(linha)
+        self.feed(1)
+        self.qr_code(data, module_size=module_size, error_correction=error_correction)
         return self
 
     def feed(self, lines: int = 1) -> "EscPosBuilder":

@@ -26,7 +26,10 @@ render_danfe_nfce - MESMOS campos de antes, "emitente" ganhou campos novos
 pro cabeçalho detalhado):
 
     {
-        "chave_acesso": "44 dígitos",
+        "tipo_documento": "nfce" | "cupom",  # opcional, default "nfce" -
+                                              # "cupom" pula chave/QR/protocolo
+                                              # (cupom não fiscal, sem valor fiscal)
+        "chave_acesso": "44 dígitos",         # obrigatório se tipo_documento=nfce
         "protocolo_autorizacao": "...",
         "data_hora_autorizacao": "...",
         "ambiente": "producao" | "homologacao",
@@ -36,10 +39,12 @@ pro cabeçalho detalhado):
         "url_consulta_chave": "...",
         "qrcode_url": "...",
         "emitente": {
-            "cnpj", "cpf", "razao_social", "ie",       # "ie" vazio -> imprime "ISENTO"
+            "cnpj", "cpf", "razao_social", "ie",       # "ie" vazio -> imprime "(ISENTO)"
             "logradouro",                              # já com número/complemento embutido
             "bairro", "cidade", "uf", "cep", "telefone",
             "endereco",                                # fallback se "logradouro" não vier
+            "logo_base64",                              # opcional, PNG/JPG em base64 - ver
+                                                          # image_receipt.py::ImageReceiptBuilder.logo
         },
         "consumidor": {"cpf_cnpj": "opcional"},
         "atendente": "opcional",
@@ -58,11 +63,14 @@ Avançado nem header/footer de texto livre, é sempre este leiaute fixo):
 """
 from __future__ import annotations
 
+import base64
+
 from devices.escpos import EscPosBuilder, chars_per_line, format_brl
 
 TEXTO_HOMOLOGACAO = "EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL"
 TEXTO_CONTINGENCIA = ("EMITIDA EM CONTINGENCIA", "Pendente de autorizacao")
 TITULO_NFCE = "Documento Auxiliar Da Nota Fiscal De Consumidor Eletrônica"
+TITULO_CUPOM = "CUPOM - SEM VALOR FISCAL"
 
 DEFAULT_TEMPLATE = {
     "mostrar_ie": True,
@@ -85,8 +93,9 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: in
     for campo in ("emitente", "itens", "totais"):
         if campo not in payload:
             raise ValueError(f"payload de impressão fiscal incompleto — falta '{campo}'")
-    if not payload.get("chave_acesso"):
-        raise ValueError("payload de impressão fiscal incompleto — falta 'chave_acesso'")
+    is_cupom = payload.get("tipo_documento", "nfce") == "cupom"
+    if not is_cupom and not payload.get("chave_acesso"):
+        raise ValueError("payload de impressão fiscal incompleto — falta 'chave_acesso' (tipo_documento=nfce)")
 
     tpl = {**DEFAULT_TEMPLATE, **(template or {})}
     contingencia = bool(payload.get("contingencia"))
@@ -109,13 +118,14 @@ def render_danfe_nfce(payload: dict, encoding: str = "cp860", paper_width_mm: in
     b.font(small=True)  # Fonte B é o padrão do corpo inteiro - só 2 trechos voltam pra Fonte A (ver abaixo)
     b.line_spacing(tpl["entrelinha_dots"])  # a altura da linha é o que de fato encolhe o cupom, não a fonte
 
-    _cabecalho_emitente(b, payload, larguras, tpl, contingencia)
+    _cabecalho_emitente(b, payload, larguras, tpl, contingencia, is_cupom)
     _atendente(b, payload, tpl, larguras.b)
     _tabela_itens(b, payload["itens"], larguras.b)
     _totais(b, payload["totais"], larguras)
     _pagamentos(b, payload, larguras.b)
 
-    _bloco_fiscal_e_qr(b, payload, larguras.b, contingencia, tpl)
+    if not is_cupom:
+        _bloco_fiscal_e_qr(b, payload, larguras.b, contingencia, tpl)
     _mensagem_empresa(b, payload, tpl, larguras.b)
 
     b.font(small=True).line_spacing(None)
@@ -154,9 +164,16 @@ class _ColunasItens:
 
 
 def _cabecalho_emitente(b: EscPosBuilder, payload: dict, larguras: "_Larguras",
-                         tpl: dict, contingencia: bool) -> None:
+                         tpl: dict, contingencia: bool, is_cupom: bool) -> None:
     emitente = payload["emitente"]
     b.align("center")
+
+    logo_base64 = emitente.get("logo_base64")
+    if logo_base64:
+        try:
+            b.logo(base64.b64decode(logo_base64))
+        except (ValueError, TypeError):
+            pass  # base64 malformado - mesma regra de "nunca derruba o cupom por causa do logo"
 
     if emitente.get("razao_social"):
         # Único trecho (junto com TOTAL) que volta pra Fonte A - destaque
@@ -188,7 +205,14 @@ def _cabecalho_emitente(b: EscPosBuilder, payload: dict, larguras: "_Larguras",
         b.bold(False)
 
     b.separator("=", larguras.b)
-    b.line(TITULO_NFCE[:larguras.b])
+    if is_cupom:
+        b.line(TITULO_CUPOM[:larguras.b])
+        # Cupom não passa por _bloco_fiscal_e_qr (exclusivo de nota fiscal)
+        # - é o único lugar que imprime data_emissao pra ele.
+        if payload.get("data_emissao"):
+            b.line(payload["data_emissao"])
+    else:
+        b.line(TITULO_NFCE[:larguras.b])
     if payload.get("ambiente") == "homologacao":
         b.bold(True).line(TEXTO_HOMOLOGACAO[:larguras.b]).bold(False)
     b.separator("-", larguras.b)
@@ -205,10 +229,12 @@ def _linha_documento(emitente: dict, tpl: dict) -> str:
         f"CPF: {emitente['cpf']}" if emitente.get("cpf") else ""
     )
     if tpl["mostrar_ie"]:
-        # "ISENTO" é o valor fiscal correto pra empresa dispensada de IE -
-        # nunca deixar a linha em branco nem repetir um placeholder de "vá
-        # configurar" numa nota já emitida (ver routes/fiscal.py no Simple ERP).
-        ie = emitente.get("ie") or "ISENTO"
+        # "(ISENTO)" entre parênteses é o valor fiscal correto pra empresa
+        # dispensada de IE - nunca deixar a linha em branco nem repetir um
+        # placeholder de "vá configurar" numa nota já emitida (ver
+        # routes/fiscal.py no Simple ERP). Sempre mostra a linha de IE,
+        # isenta ou não (pedido explícito, 2026-09-26).
+        ie = emitente.get("ie") or "(ISENTO)"
         documento = f"{documento}  IE: {ie}" if documento else f"IE: {ie}"
     return documento
 
@@ -298,49 +324,49 @@ def _pagamentos(b: EscPosBuilder, payload: dict, largura: int) -> None:
 
 
 def _bloco_fiscal_e_qr(b: EscPosBuilder, payload: dict, largura: int, contingencia: bool, tpl: dict) -> None:
-    b.align("center").separator("=", largura)
+    b.separator("=", largura)
+
+    linhas: list[str] = []
     if payload.get("url_consulta_chave"):
-        b.line("Consulte pela Chave de Acesso em")
-        b.line(payload["url_consulta_chave"][:largura])
-    b.line("Chave de acesso:")
-    b.line(_format_chave_acesso(payload["chave_acesso"]))
+        linhas.append("Consulte pela Chave de Acesso em")
+        linhas.append(payload["url_consulta_chave"])
+    linhas.append("Chave de acesso:")
+    linhas.append(_format_chave_acesso(payload["chave_acesso"]))
 
     if payload.get("numero"):
-        b.line(f"NFC-e no {payload['numero']}  Serie {payload.get('serie', '')}"[:largura])
+        linhas.append(f"NFC-e no {payload['numero']}  Serie {payload.get('serie', '')}")
     if payload.get("data_emissao"):
-        b.line(payload["data_emissao"])
+        linhas.append(payload["data_emissao"])
 
     if contingencia:
-        b.bold(True)
-        for linha in TEXTO_CONTINGENCIA:
-            b.line(linha)
-        b.bold(False)
+        linhas.extend(TEXTO_CONTINGENCIA)
     else:
         if payload.get("protocolo_autorizacao"):
-            b.line(f"Protocolo de autorizacao: {payload['protocolo_autorizacao']}"[:largura])
+            linhas.append(f"Protocolo de autorizacao: {payload['protocolo_autorizacao']}")
         if payload.get("data_hora_autorizacao"):
-            b.line(payload["data_hora_autorizacao"])
-        b.line("EMISSAO NORMAL")
+            linhas.append(payload["data_hora_autorizacao"])
+        linhas.append("EMISSAO NORMAL")
 
     if payload.get("via") == 2:
-        b.bold(True).line("Via do Estabelecimento").bold(False)
+        linhas.append("Via do Estabelecimento")
 
-    # Consumidor colado no QR (pedido explícito: "igual ao modelo da outra
-    # empresa concorrente, onde o CPF fica ao lado do QR code") - ESC/POS
-    # imprime linha a linha, então não dá pra ficar literalmente ao LADO
-    # (isso exigiria montar um bitmap raster com GS v 0, bem mais pesado e
-    # lento, e nem toda impressora suporta direito - ver docstring do
-    # módulo). O mais perto que dá pra chegar sem isso é imprimir a linha
-    # imediatamente antes do QR, sempre no mesmo lugar (identificado ou
-    # não), pra não fazer o resto do cupom pular de posição dependendo da
-    # venda ter cliente vinculado ou não.
-    b.line(_linha_consumidor(payload.get("consumidor") or {})[:largura])
+    # Consumidor junto com a chave/protocolo (pedido explícito: "igual ao
+    # modelo da outra empresa concorrente, onde o CPF fica ao lado do QR
+    # code") - ver _linha_consumidor.
+    linhas.append(_linha_consumidor(payload.get("consumidor") or {}))
 
-    # QR abaixo do bloco de texto, centralizado, comando nativo (GS ( k).
     if payload.get("qrcode_url"):
-        b.feed(1)
-        b.qr_code(payload["qrcode_url"], module_size=tpl["qr_module_size"],
-                   error_correction=tpl["qr_error_correction"])
+        # QR Code à ESQUERDA, informações da SEFAZ à DIREITA, lado a lado -
+        # economiza papel na vertical (pedido explícito, 2026-09-26). Modo
+        # texto puro (EscPosBuilder plain) não desenha lado a lado de
+        # verdade - cai pro empilhado de sempre (ver
+        # EscPosBuilder.qr_with_lines).
+        b.qr_with_lines(payload["qrcode_url"], linhas, module_size=tpl["qr_module_size"],
+                         error_correction=tpl["qr_error_correction"])
+    else:
+        b.align("center")
+        for linha in linhas:
+            b.line(linha[:largura])
 
 
 def _mensagem_empresa(b: EscPosBuilder, payload: dict, tpl: dict, largura: int) -> None:
