@@ -7,4 +7,4 @@ antes de criar a tag/release `vX.Y` — o CI (.github/workflows/
 build-packages.yml) confere que os dois batem e falha o build se
 esquecer (ver job `confere-versao`).
 """
-__version__ = "1.4"
+__version__ = "1.6"
