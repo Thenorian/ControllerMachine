@@ -60,15 +60,21 @@ PRINTABLE_DOTS = {58: 384, 80: 576}
 # pro pixel de verdade que o Pillow desenha.
 DOTS_PER_MM = 8
 
-# Margens do cupom (pedido explícito, 2026-09-26): esquerda com mais respiro
-# (a maioria das impressoras corta rente à esquerda sem isso), embaixo um
-# pouco de sobra antes do feed de corte (ver render_danfe_nfce), em cima só
-# o mínimo pra não desperdiçar bobina. Direita continua na razão antiga
-# (MARGIN_RATIO) - nunca pedido pra mudar.
-MARGIN_LEFT_MM = 3
+# Margens do cupom. Esquerda/direita reduzidas de novo (2026-09-27, pedido
+# explícito - "diminua as margens, aumente as letras, não altere o número
+# de caracteres") - são as DUAS que importam pro tamanho da fonte:
+# _fitted_font (mais abaixo) calcula o tamanho pra caber
+# CHARS_PER_LINE_FONT_B dentro de _content_width, então menos margem
+# lateral = _content_width maior = fonte maior, pro MESMO orçamento de
+# caractere por linha (nunca risco de truncar descrição de item). Ainda
+# mantém uma margem mínima (1,5mm) - zerar de vez arrisca a impressora
+# cortar rente o próprio conteúdo (motivo original da margem, 2026-09-26).
+# Topo/base mantidos (não afetam largura/fonte, só o tanto de bobina em
+# branco antes/depois do conteúdo).
+MARGIN_LEFT_MM = 1.5
 MARGIN_TOP_MM = 3
 MARGIN_BOTTOM_MM = 3
-MARGIN_RATIO = 0.02    # margem direita = 2% da largura da bobina
+MARGIN_RATIO = 0.01    # margem direita = 1% da largura da bobina (era 2%)
 
 _QR_ERROR_LEVELS = {
     "L": qrcode.constants.ERROR_CORRECT_L,
