@@ -25,14 +25,18 @@ import unicodedata
 # específico imprimir com fonte diferente, ajustar aqui.
 CHARS_PER_LINE = {58: 32, 80: 48}
 # 80mm reduzido de 64 (2026-09-26, pedido explícito - "tem cliente
-# cegueta") pra letra do corpo do cupom sair um pouco maior - menos
-# caractere por linha em ImageReceiptBuilder._fitted_font (mesma largura
-# física, fonte cresce pra compensar). Só a coluna DESCRICAO da tabela de
-# itens encolhe pra abrir esse espaço (ver _ColunasItens em
-# printer_fiscal.py) - por isso o corte é moderado (-4 caracteres, não
-# mais que isso). 58mm mantido igual - já é uma bobina estreita, a coluna
-# de descrição já é pequena o bastante sem apertar mais.
-CHARS_PER_LINE_FONT_B = {58: 42, 80: 60}
+# cegueta") pra letra do corpo do cupom sair maior - menos caractere por
+# linha em ImageReceiptBuilder._fitted_font (mesma largura física, fonte
+# cresce pra compensar). Primeira tentativa (60) foi pouco perceptível pro
+# usuário testando num cliente de verdade ("ainda não está maior") -
+# reduzido de novo, mais decisivo, pra 54. Nesse valor _ColunasItens
+# (printer_fiscal.py) passa a usar o mesmo conjunto de colunas "estreita"
+# do 58mm (código/unidade/valores um pouco mais enxutos) - a coluna
+# DESCRICAO não encolhe apesar da fonte maior, porque o espaço economizado
+# nas outras colunas compensa. 58mm mantido igual - já era o conjunto
+# estreito, reduzir mais apertava demais a descrição numa bobina que já é
+# pequena.
+CHARS_PER_LINE_FONT_B = {58: 42, 80: 54}
 
 
 def chars_per_line(paper_width_mm: int, fonte_pequena: bool = False) -> int:
