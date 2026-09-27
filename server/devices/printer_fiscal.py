@@ -151,7 +151,13 @@ class _ColunasItens:
     tamanho de papel."""
 
     def __init__(self, largura_linha: int):
-        estreita = largura_linha <= 42
+        # <= 54 (não só 42) desde que a fonte do 80mm ficou maior
+        # (CHARS_PER_LINE_FONT_B, ver escpos.py) - com menos caractere por
+        # linha no total, código/unidade/valor "largos" (pensados pra
+        # quando cabia mais coisa) sobrariam espaço à toa; o conjunto
+        # estreito devolve isso pra DESCRICAO, que senão encolheria junto
+        # com a fonte maior.
+        estreita = largura_linha <= 54
         self.num = 2
         self.codigo = 6 if estreita else 8
         self.qtd = 5
