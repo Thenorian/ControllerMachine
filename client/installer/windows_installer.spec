@@ -9,7 +9,6 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        *Tree('../dist/ControllerMachine', prefix='payload'),
         ('../assets/icon.ico', '.'),
         ('../assets/icon.png', '.'),
     ],
@@ -21,6 +20,12 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Tree() devolve tuplas de 3 (formato TOC: dest, src, typecode) - não dá pra
+# misturar com as tuplas de 2 (src, dest) do parâmetro datas= acima, dá
+# "ValueError: too many values to unpack" (já bati nessa). Soma direto no
+# a.datas (que já é TOC) depois do Analysis() pronto, igual a documentação
+# do PyInstaller recomenda pra embutir uma pasta inteira.
+a.datas += Tree('../dist/ControllerMachine', prefix='payload')
 pyz = PYZ(a.pure)
 
 exe = EXE(
