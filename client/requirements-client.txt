@@ -1,6 +1,7 @@
 # client/requirements-client.txt
 pystray==0.19.5
-Pillow==10.4.0
+Pillow==13.0.0
+certifi==2026.10.23
 pywin32>=307; sys_platform == "win32"
 pycups==2.0.1; sys_platform == "linux"
 pyserial==3.5

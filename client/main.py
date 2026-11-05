@@ -19,10 +19,28 @@ import sys
 import print_history
 import updater
 from catalog import DeviceCatalog
-from devices import printer_common, printer_fiscal, printer_cash
+from devices import escpos, printer_common, printer_fiscal, printer_cash
 from devices.scale import get_formatter
 from logging_setup import setup_logging
 from transport import ControllerTransport
+
+
+def _pre_carregar_codecs_impressao() -> None:
+    """Causa raiz já resolvida trocando o build Windows de --onefile pra
+    --onedir (ver ControllerMachine.spec): não existe mais extração pra
+    %TEMP%\\_MEIxxxxxx que um antivírus ou faxina de temporários possa
+    apagar com o processo ainda rodando (foi exatamente isso que causou um
+    FileNotFoundError em produção, 2026-11-05 — cp860, padrão do ESC/POS,
+    só é usado na hora de imprimir, ou seja, pode ser horas depois do
+    processo ter subido). Mesmo assim, forçar o uso de cada encoding aqui,
+    nos primeiros instantes do processo, não custa nada e garante que o
+    módulo correspondente já fica guardado em memória (sys.modules) — uma
+    segunda camada de defesa, não a principal."""
+    for encoding in escpos.SUPPORTED_ENCODINGS:
+        "pré-carga".encode(encoding, errors="replace")
+
+
+_pre_carregar_codecs_impressao()
 
 setup_logging()
 logger = logging.getLogger("main")

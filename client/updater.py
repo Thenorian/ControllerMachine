@@ -24,6 +24,7 @@ import logging
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -31,6 +32,8 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+import certifi
 
 from version import __version__
 
@@ -40,8 +43,20 @@ REPO = "Thenorian/ControllerMachine"
 RELEASES_API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 CHECK_INTERVAL_SECONDS = 3600
 
+# PDV com Windows desatualizado pode ter o repositório de certificados raiz
+# do próprio sistema sem o CA usado pelo GitHub (visto em produção:
+# CERTIFICATE_VERIFY_FAILED / unable to get local issuer certificate direto,
+# toda hora). Em vez de depender do certstore do Windows, valida contra o
+# pacote certifi (bundle de CAs mantido à parte, embutido no .exe) — nunca
+# contra "sem verificação", segurança aqui não se abre mão. Criado uma vez
+# aqui (módulo só é importado uma vez por processo) pelo mesmo motivo do
+# _pre_carregar_codecs_impressao em main.py: lê o arquivo de CAs já nos
+# primeiros instantes do processo, antes de qualquer risco de a pasta
+# temporária do PyInstaller desaparecer.
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+
 _ASSET_LINUX = "ControllerMachine-linux.tar.gz"
-_ASSET_WINDOWS = "ControllerMachine.exe"
+_ASSET_WINDOWS = "ControllerMachine-windows.zip"
 
 
 def _parse_version(versao: str) -> tuple[int, ...]:
@@ -75,7 +90,7 @@ def _buscar_release_mais_recente() -> dict | None:
         headers={"Accept": "application/vnd.github+json", "User-Agent": "ControllerMachine-updater"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError, ValueError) as err:
         logger.warning(f"Falha consultando releases do GitHub: {err}")
@@ -89,7 +104,7 @@ def _baixar_asset(assets: list[dict], nome: str, destino: Path) -> bool:
         return False
     try:
         req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "ControllerMachine-updater"})
-        with urllib.request.urlopen(req, timeout=120) as resp, open(destino, "wb") as f:
+        with urllib.request.urlopen(req, timeout=120, context=_SSL_CONTEXT) as resp, open(destino, "wb") as f:
             shutil.copyfileobj(resp, f)
     except (urllib.error.URLError, TimeoutError, OSError) as err:
         logger.warning(f"Falha baixando atualização: {err}")
@@ -154,19 +169,51 @@ def verificar_e_atualizar(forcar: bool = False) -> bool:
 
 
 def _atualizar_windows(assets: list[dict], tmp_dir: Path) -> bool:
-    novo_exe = tmp_dir / "ControllerMachine.new.exe"
-    if not _baixar_asset(assets, _ASSET_WINDOWS, novo_exe):
+    import zipfile
+
+    pacote_zip = tmp_dir / _ASSET_WINDOWS
+    if not _baixar_asset(assets, _ASSET_WINDOWS, pacote_zip):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return False
+
+    # --onedir (ver ControllerMachine.spec) - o release não é mais um .exe
+    # solto, é a pasta inteira (ControllerMachine.exe + _internal/)
+    # zipada, pra nunca mais depender de %TEMP% sobreviver o processo
+    # inteiro rodando (causa real de um FileNotFoundError em produção,
+    # 2026-11-05 - ver CHANGELOG/documentação interna).
+    extract_dir = tmp_dir / "extraido"
+    try:
+        with zipfile.ZipFile(pacote_zip) as zf:
+            zf.extractall(extract_dir)
+    except (zipfile.BadZipFile, OSError) as err:
+        logger.warning(f"Pacote de atualização corrompido: {err}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return False
+
+    novo_app_dir = extract_dir / "ControllerMachine"
+    novo_exe = novo_app_dir / "ControllerMachine.exe"
+    novo_internal = novo_app_dir / "_internal"
+    if not novo_exe.is_file() or not novo_internal.is_dir():
+        logger.warning("Pacote baixado não tem o formato esperado - abortando atualização")
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return False
 
     # Um .exe rodando não consegue se sobrescrever no Windows (arquivo fica
-    # travado) - dispara um .bat separado que espera o processo atual soltar
-    # o arquivo (tentando copiar em loop), troca e relança. Mesmo truque já
-    # usado em installer/windows_installer.py::schedule_self_delete - inclusive
-    # o cuidado de só apagar o PRÓPRIO .bat como última linha (`del "%~f0"`),
+    # travado), e o mesmo vale pras DLLs dentro de _internal/ que o processo
+    # atual já carregou - dispara um .bat separado que espera o processo
+    # soltar o próprio .exe (tentando copiar em loop - mesmo sinal de "já
+    # morreu" de sempre) e só então troca o _internal/ inteiro. Não tem
+    # nenhum dado do usuário ali dentro (histórico/config vivem fora, ver
+    # print_history.py/config.py), então pode apagar e recriar sem medo de
+    # perder nada. Mesmo truque de autodeleção já usado em
+    # installer/windows_installer.py::schedule_self_delete - inclusive o
+    # cuidado de só apagar o PRÓPRIO .bat como última linha (`del "%~f0"`),
     # nunca a pasta que ainda o contém enquanto ele está rodando (cmd.exe
-    # travaria tentando remover um diretório em uso pelo processo atual).
+    # travaria tentando remover um diretório em uso pelo processo atual) -
+    # por isso tmp_dir nunca é apagado aqui, fica órfão em %TEMP% mesmo.
     exe_atual = Path(sys.executable)
+    install_dir = exe_atual.parent
+    internal_atual = install_dir / "_internal"
     bat_path = tmp_dir / "atualizar.bat"
     bat_content = (
         "@echo off\r\n"
@@ -176,7 +223,8 @@ def _atualizar_windows(assets: list[dict], tmp_dir: Path) -> bool:
         "  timeout /t 1 /nobreak >nul\r\n"
         "  goto loop\r\n"
         ")\r\n"
-        f'del "{novo_exe}" >nul 2>&1\r\n'
+        f'rmdir /s /q "{internal_atual}" >nul 2>&1\r\n'
+        f'move /y "{novo_internal}" "{internal_atual}" >nul\r\n'
         f'start "" "{exe_atual}"\r\n'
         'del "%~f0"\r\n'
     )

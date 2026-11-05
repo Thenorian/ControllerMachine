@@ -1,14 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Builda DEPOIS de client/ControllerMachine.spec — embute o .exe já pronto
-# como dado (payload/), este instalador não compila o app, só empacota.
+# Builda DEPOIS de client/ControllerMachine.spec — embute a pasta
+# dist/ControllerMachine/ já pronta (ControllerMachine.exe + _internal/,
+# ver ControllerMachine.spec) como dado (payload/), este instalador não
+# compila o app, só empacota.
 
 a = Analysis(
     ['windows_installer.py'],
     pathex=[],
     binaries=[],
     datas=[
-        ('../dist/ControllerMachine.exe', 'payload'),
-        ('../assets/icon.ico', 'payload/assets'),
+        *Tree('../dist/ControllerMachine', prefix='payload'),
+        ('../assets/icon.ico', '.'),
         ('../assets/icon.png', '.'),
     ],
     hiddenimports=[],

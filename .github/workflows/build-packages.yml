@@ -37,28 +37,32 @@ jobs:
           pip install -r requirements-client.txt
           pip install pyinstaller
 
-      - name: Gera o ControllerMachine.exe
+      - name: Gera a pasta do ControllerMachine (--onedir)
         run: pyinstaller ControllerMachine.spec
 
       - name: Gera o instalador (ControllerMachineSetup.exe)
         working-directory: client/installer
         run: pyinstaller windows_installer.spec
 
-      - name: Anexa os .exe à release
+      - name: Compacta a pasta do ControllerMachine (--onedir não é um .exe só)
+        shell: pwsh
+        run: Compress-Archive -Path dist/ControllerMachine -DestinationPath dist/ControllerMachine-windows.zip
+
+      - name: Anexa os pacotes à release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" dist/ControllerMachine.exe --clobber
+          gh release upload "${{ github.event.release.tag_name }}" dist/ControllerMachine-windows.zip --clobber
           gh release upload "${{ github.event.release.tag_name }}" installer/dist/ControllerMachineSetup.exe --clobber
 
-      - name: Publica os .exe como artifacts (execução manual)
+      - name: Publica os pacotes como artifacts (execução manual)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: ControllerMachine-windows
           path: |
-            client/dist/ControllerMachine.exe
+            client/dist/ControllerMachine-windows.zip
             client/installer/dist/ControllerMachineSetup.exe
 
   build-linux:

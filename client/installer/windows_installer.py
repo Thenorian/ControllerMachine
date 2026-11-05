@@ -3,9 +3,10 @@ Instalador Windows do Controller Machine.
 
 De propósito minúsculo e feito só com Tkinter (stdlib) + pywin32 (já é
 dependência do próprio Controller Machine) — a única serventia dele é copiar
-o ControllerMachine.exe já compilado (embutido aqui dentro como dado do
-PyInstaller, ver windows_installer.spec) pro destino escolhido e configurar
-o que for marcado. Depois disso ele é descartável.
+a pasta do Controller Machine já compilada (ControllerMachine.exe +
+_internal/, embutida aqui dentro como dado do PyInstaller, ver
+windows_installer.spec) pro destino escolhido e configurar o que for
+marcado. Depois disso ele é descartável.
 
 Builda DEPOIS do ControllerMachine.exe (ver .github/workflows/
 build-windows-exe.yml) — o .spec deste instalador embute o .exe já pronto.
@@ -57,7 +58,7 @@ class InstallerApp(tk.Tk):
         self.resizable(False, False)
         self.geometry("560x360")
         try:
-            self.iconbitmap(str(bundled_path("payload", "assets", "icon.ico")))
+            self.iconbitmap(str(bundled_path("icon.ico")))
         except Exception:
             pass
 
@@ -132,8 +133,12 @@ class InstallerApp(tk.Tk):
             install_dir.mkdir(parents=True, exist_ok=True)
             (install_dir / "logs").mkdir(exist_ok=True)
 
+            # --onedir (ver ControllerMachine.spec): "payload" é a pasta
+            # inteira (ControllerMachine.exe + _internal/), não mais um
+            # único arquivo - copia tudo de uma vez, sem depender de pasta
+            # temporária nenhuma depois de instalado.
+            shutil.copytree(bundled_path("payload"), install_dir, dirs_exist_ok=True)
             target_exe = install_dir / "ControllerMachine.exe"
-            shutil.copyfile(bundled_path("payload", "ControllerMachine.exe"), target_exe)
 
             if self.autostart_var.get():
                 # Reaproveita a lógica que já existe no próprio app
