@@ -43,6 +43,12 @@ def default_config() -> dict:
         "secret": str(uuid.uuid4()),
         "company_name": "",
         "devices": [],
+        # Aba Configurações (ver gui/window.py). Instalação já existente que
+        # não tinha esses campos ganha o default aqui mesmo (load_config
+        # preenche o que faltar sem sobrescrever o resto) - começa com os
+        # dois ligados, mesmo comportamento de sempre.
+        "atualizacao_automatica": True,
+        "guardar_historico": True,
     }
 
 

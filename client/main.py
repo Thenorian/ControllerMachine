@@ -15,6 +15,7 @@ import base64
 import logging
 import platform
 import sys
+from datetime import datetime
 
 import print_history
 import updater
@@ -74,7 +75,10 @@ def handle_job(catalog: DeviceCatalog, job: dict, ask_folder=None) -> dict:
     if device is None:
         return {"status": "error", "message": f"dispositivo desconhecido: {job.get('device_id')}"}
 
-    rastreado = kind in JOBS_RASTREADOS
+    # "Guardar trabalhos" (aba Configurações, ver gui/window.py) desligado
+    # só pula a gravação no histórico - o job continua sendo executado e
+    # logado normalmente no log de texto, só não fica guardado no SQLite.
+    rastreado = kind in JOBS_RASTREADOS and catalog.guardar_historico
     descricao = _descricao_job(kind, job) if rastreado else None
 
     try:
@@ -267,6 +271,10 @@ def run_linux(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
         service_linux.uninstall()
         return
 
+    if "--historico" in sys.argv:
+        _imprimir_historico()
+        return
+
     transport.start()
     logger.info(
         "Rodando em primeiro plano. Para instalar como serviço systemd: "
@@ -278,11 +286,30 @@ def run_linux(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
             # achar uma versão nova, updater já baixa, instala e reinicia
             # sozinho (systemd Restart=on-failure, ou subprocess detached
             # fora do systemd) - só precisa parar de rodar este processo.
-            if updater.verificar_e_atualizar():
+            # Aba Configurações (ver gui/window.py) controla isso no
+            # Windows - aqui no Linux sem GUI, config.json mesmo.
+            if catalog.atualizacao_automatica and updater.verificar_e_atualizar():
                 return
             __import__("time").sleep(updater.CHECK_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         transport.stop()
+
+
+def _imprimir_historico() -> None:
+    """Linux não tem janela (ver módulo), então a aba "Histórico" do
+    Windows (gui/window.py::_build_history_tab) não existe aqui - único
+    jeito de ver os jobs já executados era abrir o print_history.db na mão.
+    `python main.py --historico` imprime a mesma informação no terminal."""
+    registros = print_history.listar(limite=200)
+    if not registros:
+        print("Nenhum job registrado ainda.")
+        return
+    for r in registros:
+        quando = datetime.fromtimestamp(r["timestamp"]).strftime("%d/%m/%Y %H:%M:%S")
+        status = "OK" if r["sucesso"] else "FALHOU"
+        doc = f" ({r['tipo_documento']})" if r["tipo_documento"] else ""
+        mensagem = f" - {r['mensagem']}" if r["mensagem"] else ""
+        print(f"{quando}  {status:6}  {r['device_label']}  {r['tipo_job']}{doc}{mensagem}")
 
 
 def run_windows(catalog: DeviceCatalog, transport: ControllerTransport, ask_folder_holder: dict) -> None:
@@ -319,7 +346,10 @@ def _agendar_verificacao_de_atualizacao(window) -> None:
     o processo libera o arquivo pro .bat copiar por cima)."""
     def checar():
         try:
-            if updater.verificar_e_atualizar():
+            # Checkbox "Atualização automática" (aba Configurações) - só
+            # desliga essa checagem periódica, "Verificar agora"/"Forçar
+            # atualização" continuam funcionando na hora, manualmente.
+            if window.catalog.atualizacao_automatica and updater.verificar_e_atualizar():
                 window.quit()
                 return
         except Exception:

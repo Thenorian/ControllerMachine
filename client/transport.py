@@ -14,9 +14,30 @@ import platform
 import socket
 import threading
 import time
+import uuid
 from typing import Callable
 
 logger = logging.getLogger("transport")
+
+
+def mac_address() -> str:
+    """Endereço MAC da máquina, formatado como de costume
+    (AA:BB:CC:DD:EE:FF). Mandado no `register` (ver connector.py) pra dar
+    ao Simple ERP uma referência de "qual máquina física é essa" que não
+    muda - hoje só tem o IP da conexão TCP pra isso, e IP muda a cada
+    renovação de DHCP (mesma loja, mesmo PDV, "aparecendo" como origem
+    diferente toda hora na tela). controller_id (ver catalog.py) já é
+    estável e é a identidade de verdade usada pra tudo (autenticação,
+    chave no dicionário de clientes conectados) - MAC é só um dado extra
+    pra exibição/diagnóstico do lado do Simple ERP, não substitui isso.
+
+    uuid.getnode() é stdlib (sem dependência nova), mas se não conseguir
+    achar o MAC de verdade (raro, depende do SO/placa) cai num número
+    aleatório de 48 bits, igual a própria documentação do Python avisa -
+    não tem como saber à toa que isso aconteceu, então continua sendo "o
+    melhor que dá pra obter sem biblioteca extra."""
+    node = uuid.getnode()
+    return ":".join(f"{(node >> deslocamento) & 0xFF:02x}" for deslocamento in range(40, -8, -8))
 
 # Sem isso, um socket.recv() bloqueado fica esperando pra sempre se o lado
 # de lá some sem mandar um FIN/RST (ex.: `docker rm -f` no deploy do Simple
@@ -146,6 +167,7 @@ class ControllerTransport:
                     "type": "register",
                     "controller_id": self.controller_id,
                     "secret": self.secret,
+                    "mac_address": mac_address(),
                     "devices": self.announce_payload(),
                 })
 

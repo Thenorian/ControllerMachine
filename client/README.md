@@ -13,6 +13,8 @@ python main.py
 
 Linux: `python main.py --install-service` registra como serviço systemd
 (precisa de `sudo`). `python main.py --uninstall-service` remove.
+`python main.py --historico` imprime no terminal os últimos jobs de
+impressão executados (sem GUI, não tem a aba "Histórico" do Windows).
 Windows: `python main.py --install-autostart` cria atalho na pasta Startup.
 
 ## Apontar para outro servidor
@@ -42,6 +44,8 @@ renomeado ou realocado do lado do Simple ERP.
   "controller_id": "uuid — gerado automaticamente, não editar",
   "secret": "uuid — gerado automaticamente, não editar",
   "company_name": "Nome da loja (só exibição local)",
+  "atualizacao_automatica": true,
+  "guardar_historico": true,
   "devices": [
     {
       "device_id": "uuid — gerado automaticamente, não editar",
@@ -53,6 +57,10 @@ renomeado ou realocado do lado do Simple ERP.
   ]
 }
 ```
+
+`atualizacao_automatica`/`guardar_historico` têm checkbox próprio na aba
+Configurações (Windows) — editam este mesmo `config.json`, não precisam de
+edição manual. No Linux (sem GUI), editar os dois direto no arquivo.
 
 ## Estrutura
 

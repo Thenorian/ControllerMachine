@@ -49,6 +49,22 @@ class DeviceCatalog:
     def connector_port(self) -> int:
         return self._config["connector_port"]
 
+    @property
+    def atualizacao_automatica(self) -> bool:
+        return self._config.get("atualizacao_automatica", True)
+
+    def set_atualizacao_automatica(self, ativa: bool) -> None:
+        self._config["atualizacao_automatica"] = ativa
+        self._save()
+
+    @property
+    def guardar_historico(self) -> bool:
+        return self._config.get("guardar_historico", True)
+
+    def set_guardar_historico(self, ativo: bool) -> None:
+        self._config["guardar_historico"] = ativo
+        self._save()
+
     def set_connector(self, host: str, port: int) -> None:
         """Aponta o Controller Machine pra outro servidor (endereço do
         connector embutido no Simple ERP). Quem chama isso ainda precisa

@@ -65,7 +65,7 @@ class ControllerConnector:
         self.on_event = on_event
 
         self._server_socket: socket.socket | None = None
-        self._clients: dict[str, dict] = {}  # controller_id -> {conn, addr, devices, last_seen}
+        self._clients: dict[str, dict] = {}  # controller_id -> {conn, addr, mac_address, devices, last_seen}
         self._lock = threading.RLock()
         self._pending: dict[str, "queue.Queue"] = {}  # job_id -> fila esperando o ack
         self._running = False
@@ -122,6 +122,17 @@ class ControllerConnector:
         with self._lock:
             entry = self._clients.get(controller_id)
             return dict(entry["devices"]) if entry else {}
+
+    def get_mac_address(self, controller_id: str) -> str | None:
+        """Endereço MAC que o Controller Machine mandou no último `register`
+        (ver transport.py::mac_address lá do client) - não muda com a
+        renovação de DHCP como o IP da conexão (`addr`) muda, então é essa a
+        referência que vale a pena guardar/exibir pra identificar a máquina
+        física, não o IP. None quando o controller está offline ou está
+        numa versão antiga do Controller Machine que ainda não manda isso."""
+        with self._lock:
+            entry = self._clients.get(controller_id)
+            return entry.get("mac_address") if entry else None
 
     def list_online_controllers(self) -> list[str]:
         with self._lock:
@@ -231,15 +242,25 @@ class ControllerConnector:
                 conn.close()
                 return
 
+            mac_address = msg.get("mac_address")
             with self._lock:
                 self._clients[controller_id] = {
                     "conn": conn,
                     "addr": addr,
+                    "mac_address": mac_address,
                     "devices": msg.get("devices", {}),
                     "last_seen": time.time(),
                 }
             self._send_raw(conn, {"type": "register_ack", "status": "ok"})
-            self._emit("controller_connected", {"controller_id": controller_id, "addr": str(addr)})
+            # addr (IP:porta da conexão TCP) muda a cada renovação de DHCP -
+            # mesma loja, mesmo PDV, "chegando" de IP diferente toda hora
+            # nesse evento. mac_address (quando o Controller Machine manda,
+            # ver get_mac_address) é estável - prefira ele pra identificar
+            # a máquina física em qualquer tela/log que o Simple ERP monte
+            # a partir desse evento, addr serve só pra diagnóstico de rede.
+            self._emit("controller_connected", {
+                "controller_id": controller_id, "addr": str(addr), "mac_address": mac_address,
+            })
 
             conn.settimeout(None)
             while self._running:

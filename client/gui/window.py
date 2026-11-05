@@ -333,6 +333,32 @@ class ControllerWindow(tk.Tk):
         self.force_update_btn = ttk.Button(buttons, text="Forçar atualização", command=self._force_update)
         self.force_update_btn.pack(side="left", padx=(6, 0))
 
+        # "Verificar agora"/"Forçar atualização" continuam funcionando mesmo
+        # com isso desligado - só a checagem periódica automática (de hora
+        # em hora, ver main.py) para. Desligar não é o padrão (começa
+        # ligado, ver config.py::default_config) - existe pra quem precisa
+        # travar a versão por algum motivo (equipamento/driver sensível a
+        # mudança) sem perder o botão manual de atualizar quando quiser.
+        self.auto_update_var = tk.BooleanVar(value=self.catalog.atualizacao_automatica)
+        ttk.Checkbutton(
+            update_frame, text="Atualização automática (verifica de hora em hora)",
+            variable=self.auto_update_var,
+            command=lambda: self.catalog.set_atualizacao_automatica(self.auto_update_var.get()),
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        options_frame = ttk.LabelFrame(parent, text="Opções", padding=8)
+        options_frame.pack(fill="x", pady=(8, 0))
+
+        # Desligar não apaga o que já tem guardado (aba Histórico) nem
+        # afeta a impressão em si - só pula a gravação de jobs novos no
+        # SQLite local (ver main.py::handle_job / print_history.py).
+        self.guardar_historico_var = tk.BooleanVar(value=self.catalog.guardar_historico)
+        ttk.Checkbutton(
+            options_frame, text="Guardar histórico de trabalhos (aba Histórico)",
+            variable=self.guardar_historico_var,
+            command=lambda: self.catalog.set_guardar_historico(self.guardar_historico_var.get()),
+        ).pack(anchor="w")
+
     def _check_for_updates(self) -> None:
         self.check_update_btn.configure(state="disabled")
         self.update_status_label.configure(text="Verificando...", foreground="#b8860b")
