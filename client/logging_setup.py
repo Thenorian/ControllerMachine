@@ -28,7 +28,7 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def _nome_log_de_hoje(log_dir: Path) -> Path:
+def nome_log_de_hoje(log_dir: Path) -> Path:
     return log_dir / f"controller-machine-{date.today():%Y-%m-%d}.log"
 
 
@@ -54,7 +54,7 @@ class _ArquivoComDataNoNome(logging.handlers.TimedRotatingFileHandler):
     precisa ficar com nome limpo."""
 
     def _open(self):
-        self.baseFilename = str(_nome_log_de_hoje(Path(self.baseFilename).parent))
+        self.baseFilename = str(nome_log_de_hoje(Path(self.baseFilename).parent))
         return super()._open()
 
     def getFilesToDelete(self) -> list[str]:
@@ -71,7 +71,7 @@ def setup_logging(level: int = logging.INFO) -> None:
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 
     file_handler = _ArquivoComDataNoNome(
-        _nome_log_de_hoje(log_dir),
+        nome_log_de_hoje(log_dir),
         when="midnight",
         backupCount=MAX_LOG_FILES,
         encoding="utf-8",

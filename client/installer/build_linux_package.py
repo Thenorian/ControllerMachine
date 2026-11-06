@@ -1,8 +1,8 @@
 """
 Monta o pacote de instalação Linux (.tar.gz) do Controller Machine — não
 compila nada (Linux roda o código Python direto, sem PyInstaller), só reúne
-os arquivos necessários pro serviço headless (sem gui/, que é só usado pelo
-Windows) junto do install.sh numa pasta app/, e tar.gz's o resultado.
+os arquivos necessários (serviço + janela opcional, ver main.py::run_linux/
+run_linux_gui) junto do install.sh numa pasta app/, e tar.gz's o resultado.
 
 Uso: python installer/build_linux_package.py
 Saída: dist/ControllerMachine-linux.tar.gz (mesma pasta dist/ do .exe).
@@ -26,22 +26,29 @@ INCLUDE_FILES = [
     "logging_setup.py",
     "version.py",
     "updater.py",
+    "discovery.py",
+    "ipc.py",
+    "ipc_server.py",
+    "ipc_client.py",
+    "print_history.py",
 ]
-INCLUDE_DIRS = ["devices"]
+INCLUDE_DIRS = ["devices", "gui", "assets"]
 
-# discovery.py, gui/ e assets/ não entram — só servem pra tray/janela do
-# Windows, e o Linux não tem GUI (README já documenta isso). Por causa disso
-# pystray/Pillow/pycups de requirements-client.txt também ficam de fora:
-# nenhum módulo do pacote Linux importa eles, e pycups em especial exige
-# libcups2-dev instalado no sistema só pra compilar — dependência real que
-# não serve pra nada aqui, então nem vale arriscar a instalação por causa
-# dela. pyserial é a única lib externa de fato usada (balança serial).
+# pystray fica de fora (tray é coisa do ícone de bandeja do Windows, ver
+# gui/tray.py - Linux não tem bandeja aqui, o app gráfico abre como janela
+# comum do KDE/GNOME/etc, ver run_linux_gui em main.py). Pillow (ícone da
+# janela) e pycups (listar impressora instalada no CUPS, ver discovery.py)
+# agora entram - são usados de verdade pela janela/diálogo de dispositivo.
+# pycups precisa de cabeçalho de desenvolvimento do CUPS instalado no
+# sistema pra compilar (libcups2-dev no Debian/Ubuntu, cups no Arch) -
+# ver aviso em installer/linux/install.sh.
 LINUX_REQUIREMENTS_HEADER = "# gerado por installer/build_linux_package.py — só o que o client Linux usa de fato\n"
+_LINUX_REQUIREMENTS_PREFIXOS = ("pyserial", "Pillow", "pycups", "certifi")
 
 
 def _linux_requirements() -> str:
     lines = (CLIENT_DIR / "requirements-client.txt").read_text(encoding="utf-8").splitlines()
-    kept = [line for line in lines if line.strip().startswith("pyserial")]
+    kept = [line for line in lines if line.split("==")[0].split(">=")[0].strip() in _LINUX_REQUIREMENTS_PREFIXOS]
     return LINUX_REQUIREMENTS_HEADER + "\n".join(kept) + "\n"
 
 
@@ -64,6 +71,16 @@ def build() -> Path:
     install_sh = staging / "install.sh"
     shutil.copy2(INSTALLER_DIR / "linux" / "install.sh", install_sh)
     install_sh.chmod(0o755)
+
+    # install.sh substitui {venv_python}/{main_py}/{icon_path} pelo caminho
+    # de instalação escolhido (só se sabe em tempo de instalação) e copia
+    # pro menu de aplicativos do usuário (~/.local/share/applications) -
+    # mesmo arquivo funciona em qualquer ambiente freedesktop (KDE, GNOME,
+    # XFCE etc.), não precisa de nada específico de distro.
+    shutil.copy2(
+        INSTALLER_DIR / "linux" / "controller-machine.desktop.template",
+        staging / "controller-machine.desktop.template",
+    )
 
     DIST_DIR.mkdir(exist_ok=True)
     tarball_path = DIST_DIR / "ControllerMachine-linux.tar.gz"

@@ -2,12 +2,16 @@
 Controller Machine — ponto de entrada.
 
 Windows: abre com ícone na bandeja (janela começa escondida se já estiver
-configurado; aparece se for a primeira execução).
+configurado; aparece se for a primeira execução). Serviço e janela são o
+mesmo processo.
 
-Linux: sem GUI. `python main.py --install-service` registra e sobe como
-serviço systemd (precisa de sudo). Rodando direto (sem esse flag), funciona
-em primeiro plano — útil para debug ou pra quem preferir gerenciar o
-processo de outro jeito (supervisord, docker, etc.).
+Linux: quem faz o trabalho de verdade (conexão com o connector, impressão)
+é sempre o serviço systemd (`python main.py --install-service`, precisa de
+sudo; rodando direto sem esse flag, funciona em primeiro plano - útil pra
+debug ou quem prefere outro gerenciador de processo, ex. supervisord).
+`python main.py --gui` abre uma janela separada (KDE/GNOME/etc., como um
+app comum) que só visualiza/controla esse serviço por IPC local (ver
+ipc_client.py) - nunca é o processo que efetivamente imprime nada.
 """
 from __future__ import annotations
 
@@ -275,7 +279,14 @@ def run_linux(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
         _imprimir_historico()
         return
 
+    if "--gui" in sys.argv:
+        run_linux_gui()
+        return
+
+    from ipc_server import IPCServer
+
     transport.start()
+    IPCServer(catalog, transport).start()
     logger.info(
         "Rodando em primeiro plano. Para instalar como serviço systemd: "
         "python main.py --install-service"
@@ -295,11 +306,44 @@ def run_linux(catalog: DeviceCatalog, transport: ControllerTransport) -> None:
         transport.stop()
 
 
+def run_linux_gui() -> None:
+    """`python main.py --gui` - abre a mesma janela do Windows
+    (gui/window.py), mas como visualizador/controle remoto do serviço que
+    já deve estar rodando em segundo plano (systemd), nunca fazendo o
+    trabalho de impressão por conta própria neste processo (ver
+    ipc_client.py/ipc_server.py). Pensado pra virar um ícone no menu de
+    aplicativos do KDE/GNOME/etc., não pra rodar escondido/sempre ligado -
+    por isso não tem tray aqui como no Windows: fechar a janela só encerra
+    este processo, o serviço continua intacto."""
+    import tkinter as tk
+    from tkinter import messagebox
+
+    import ipc_client
+    from gui.window import ControllerWindow
+
+    remote_catalog, remote_transport, remote_updater = ipc_client.criar_proxies()
+    try:
+        window = ControllerWindow(remote_catalog, remote_transport, updater_facade=remote_updater)
+    except ipc_client.ServicoIndisponivel as err:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "Controller Machine",
+            "Não foi possível conectar ao serviço em segundo plano.\n\n"
+            f"{err}\n\n"
+            "Verifique se ele está rodando: systemctl status controller-machine",
+        )
+        root.destroy()
+        return
+
+    window.protocol("WM_DELETE_WINDOW", window.destroy)
+    window.mainloop()
+
+
 def _imprimir_historico() -> None:
-    """Linux não tem janela (ver módulo), então a aba "Histórico" do
-    Windows (gui/window.py::_build_history_tab) não existe aqui - único
-    jeito de ver os jobs já executados era abrir o print_history.db na mão.
-    `python main.py --historico` imprime a mesma informação no terminal."""
+    """`python main.py --historico` - lado headless (sem `--gui`) não tem
+    a aba "Histórico" da janela (gui/window.py::_build_history_tab), então
+    imprime a mesma informação no terminal."""
     registros = print_history.listar(limite=200)
     if not registros:
         print("Nenhum job registrado ainda.")

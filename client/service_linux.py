@@ -1,9 +1,11 @@
 """
 Registro como serviço systemd no Linux — em vez de exigir que o cliente
 edite um .service manualmente, `python main.py --install-service` escreve o
-unit file certo e já habilita/inicia. Sem GUI/tray no Linux (systemd não tem
-bandeja) — a "interface" no Linux é o config.json (mesmo schema do Windows)
-mais os logs do `journalctl`.
+unit file certo e já habilita/inicia. Serviço não tem tray (systemd não
+tem bandeja) — quem quiser uma janela abre `python main.py --gui`
+separadamente (ver run_linux_gui em main.py), que fala com este serviço
+por IPC local (ver ipc.py/ipc_server.py) em vez de fazer o trabalho ela
+mesma.
 """
 from __future__ import annotations
 
@@ -29,6 +31,11 @@ ExecStart={python_exe} {entrypoint}
 Restart=on-failure
 RestartSec=5
 User={user}
+# Cria/limpa /run/controller-machine sozinho a cada start, já com a posse
+# certa (User= acima) - é onde o socket do IPC local mora (ver ipc.py);
+# sem isso o processo precisaria de permissão pra criar pasta em /run na
+# mão, que normalmente só root tem.
+RuntimeDirectory={service_name}
 
 [Install]
 WantedBy=multi-user.target
@@ -54,13 +61,16 @@ def install_and_start(entrypoint_path: str, run_as_user: str | None = None) -> b
             f"{UNIT_PATH} e depois:\n"
             f"    sudo systemctl daemon-reload && sudo systemctl enable --now {SERVICE_NAME}\n\n"
             + UNIT_TEMPLATE.format(
-                python_exe=sys.executable, entrypoint=entrypoint_path, user=run_as_user or "root"
+                python_exe=sys.executable, entrypoint=entrypoint_path, user=run_as_user or "root",
+                service_name=SERVICE_NAME,
             )
         )
         return False
 
     user = run_as_user or os.environ.get("SUDO_USER", "root")
-    unit_content = UNIT_TEMPLATE.format(python_exe=sys.executable, entrypoint=entrypoint_path, user=user)
+    unit_content = UNIT_TEMPLATE.format(
+        python_exe=sys.executable, entrypoint=entrypoint_path, user=user, service_name=SERVICE_NAME,
+    )
     UNIT_PATH.write_text(unit_content, encoding="utf-8")
 
     subprocess.run(["systemctl", "daemon-reload"], check=True)

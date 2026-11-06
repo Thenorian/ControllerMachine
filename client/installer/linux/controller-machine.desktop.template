@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Controller Machine
+Comment=Visualizador e controle do Controller Machine (o serviço em segundo plano continua rodando mesmo com a janela fechada)
+Exec={venv_python} {main_py} --gui
+Icon={icon_path}
+Terminal=false
+Categories=Utility;
+StartupWMClass=Controller Machine

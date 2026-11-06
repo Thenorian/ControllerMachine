@@ -12,10 +12,17 @@ python main.py
 ```
 
 Linux: `python main.py --install-service` registra como serviço systemd
-(precisa de `sudo`). `python main.py --uninstall-service` remove.
-`python main.py --historico` imprime no terminal os últimos jobs de
-impressão executados (sem GUI, não tem a aba "Histórico" do Windows).
-Windows: `python main.py --install-autostart` cria atalho na pasta Startup.
+(precisa de `sudo`) - é esse processo que de fato fala com o connector e
+imprime (sozinho, sem janela nenhuma). `python main.py --uninstall-service`
+remove. `python main.py --gui` abre uma janela separada (ícone próprio no
+menu de aplicativos do KDE/GNOME/XFCE/etc. depois do `install.sh`) que só
+visualiza/controla esse serviço por IPC local (ver ipc.py/ipc_server.py/
+ipc_client.py) - nunca imprime nada por conta própria, e fechá-la não
+afeta o serviço. `python main.py --historico` imprime no terminal os
+últimos jobs de impressão executados, sem precisar abrir `--gui`.
+Windows: `python main.py --install-autostart` cria atalho na pasta Startup
+(lá, serviço e janela são sempre o mesmo processo - ver run_windows em
+main.py).
 
 ## Apontar para outro servidor
 
@@ -59,14 +66,17 @@ renomeado ou realocado do lado do Simple ERP.
 ```
 
 `atualizacao_automatica`/`guardar_historico` têm checkbox próprio na aba
-Configurações (Windows) — editam este mesmo `config.json`, não precisam de
-edição manual. No Linux (sem GUI), editar os dois direto no arquivo.
+Configurações (Windows e Linux via `--gui`) — editam este mesmo
+`config.json`, não precisam de edição manual.
 
 ## Estrutura
 
 - `config.py` / `catalog.py` — persistência e regra de IDs imutáveis.
 - `discovery.py` — impressoras instaladas no SO (Windows/Linux).
 - `transport.py` — socket com o connector, reconexão automática.
+- `ipc.py` / `ipc_server.py` / `ipc_client.py` — só no Linux: socket Unix
+  local entre o serviço (dono de catalog/transport) e a janela (`--gui`,
+  processo separado) - ver run_linux/run_linux_gui em main.py.
 - `devices/` — execução dos jobs: impressão comum, fiscal/NFC-e
   (`printer_fiscal.py`), cupom de caixa (`printer_cash.py`, não fiscal),
   balança por marca em `devices/scale/`, motor de placeholder de texto

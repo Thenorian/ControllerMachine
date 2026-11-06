@@ -1,13 +1,21 @@
 """
 Janela de administração do Controller Machine — identidade/servidor,
 cadastro de dispositivos e log, organizados em abas (estilo "Propriedades"
-do Windows / OpenVPN GUI: simples, sem frescura). Abre a partir do ícone da
-bandeja (Windows) ou pode rodar direto (Linux, sem tray — ver main.py).
-"""
+do Windows / OpenVPN GUI: simples, sem frescura).
+
+Windows: abre a partir do ícone da bandeja, no mesmo processo que já faz o
+trabalho de verdade (catálogo, conexão com o connector) - `self.catalog`/
+`self.transport` (ver main.py::run_windows) são os objetos reais.
+
+Linux: o serviço (systemd, roda em segundo plano) é quem faz o trabalho de
+verdade; esta janela pode ser aberta à parte, como um app comum do
+KDE/GNOME/etc. (ver main.py::run_linux_gui), e nesse caso `self.catalog`/
+`self.transport` são objetos remotos (ver ipc_client.py) que conversam com
+o serviço por um socket Unix local - a classe não sabe (nem precisa saber)
+a diferença, só chama os mesmos métodos."""
 from __future__ import annotations
 
 import logging
-import queue
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -106,11 +114,37 @@ def _png_bytes(pil_image) -> bytes:
     return buffer.getvalue()
 
 
+class LocalUpdaterFacade:
+    """Chama updater.py/version.py direto - é o que o Windows sempre fez
+    (serviço e janela são o mesmo processo lá, ver run_windows em main.py).
+    No Linux, a janela pode estar rodando num processo separado do serviço
+    (ver main.py::run_linux_gui) - RemoteUpdaterFacade (ipc_client.py) tem
+    a mesma interface, só que manda cada chamada pro serviço pelo socket
+    IPC em vez de chamar local. ControllerWindow não sabe (nem precisa
+    saber) qual das duas está recebendo."""
+
+    def get_version(self) -> str:
+        return version.__version__
+
+    def esta_em_instalacao_real(self) -> bool:
+        return updater.esta_em_instalacao_real()
+
+    def consultar_ultima_release(self) -> dict | None:
+        return updater.consultar_ultima_release()
+
+    def versao_mais_nova(self, tag: str) -> bool:
+        return updater.versao_mais_nova(tag)
+
+    def forcar_atualizacao(self) -> bool:
+        return updater.verificar_e_atualizar(forcar=True)
+
+
 class ControllerWindow(tk.Tk):
-    def __init__(self, catalog: DeviceCatalog, transport: ControllerTransport):
+    def __init__(self, catalog: DeviceCatalog, transport: ControllerTransport, updater_facade=None):
         super().__init__()
         self.catalog = catalog
         self.transport = transport
+        self.updater_facade = updater_facade or LocalUpdaterFacade()
         self.title("Controller Machine")
         self._set_icon()
         self.folder_prompt = FolderPromptService(self)
@@ -312,10 +346,10 @@ class ControllerWindow(tk.Tk):
 
         ttk.Label(update_frame, text="Versão instalada:", width=LABEL_WIDTH).grid(
             row=0, column=0, sticky="w", pady=2)
-        ttk.Label(update_frame, text=f"v{version.__version__}").grid(row=0, column=1, sticky="w", pady=2)
+        ttk.Label(update_frame, text=f"v{self.updater_facade.get_version()}").grid(row=0, column=1, sticky="w", pady=2)
 
         ambiente_texto = (
-            "Instalação real — atualização automática ativa" if updater.esta_em_instalacao_real()
+            "Instalação real — atualização automática ativa" if self.updater_facade.esta_em_instalacao_real()
             else "Ambiente de desenvolvimento — atualização automática desligada de propósito"
         )
         ttk.Label(update_frame, text="Ambiente:", width=LABEL_WIDTH).grid(row=1, column=0, sticky="w", pady=2)
@@ -364,7 +398,7 @@ class ControllerWindow(tk.Tk):
         self.update_status_label.configure(text="Verificando...", foreground="#b8860b")
 
         def worker() -> None:
-            release = updater.consultar_ultima_release()
+            release = self.updater_facade.consultar_ultima_release()
             self.after(0, lambda: self._on_check_result(release))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -379,7 +413,7 @@ class ControllerWindow(tk.Tk):
             )
             return
         tag = release.get("tag_name", "?")
-        if updater.versao_mais_nova(tag):
+        if self.updater_facade.versao_mais_nova(tag):
             self.update_status_label.configure(
                 foreground="#b8860b",
                 text=f"Nova versão disponível: {tag} (verificado às {agora}).",
@@ -387,11 +421,11 @@ class ControllerWindow(tk.Tk):
         else:
             self.update_status_label.configure(
                 foreground="#1a7f37",
-                text=f"Você está atualizado (v{version.__version__}, verificado às {agora}).",
+                text=f"Você está atualizado (v{self.updater_facade.get_version()}, verificado às {agora}).",
             )
 
     def _force_update(self) -> None:
-        if not updater.esta_em_instalacao_real():
+        if not self.updater_facade.esta_em_instalacao_real():
             messagebox.showinfo(
                 "Ambiente de desenvolvimento",
                 "Este ambiente não é uma instalação real (rodando a partir do código-fonte em "
@@ -412,7 +446,7 @@ class ControllerWindow(tk.Tk):
         self.update_status_label.configure(text="Baixando e instalando atualização...", foreground="#b8860b")
 
         def worker() -> None:
-            atualizou = updater.verificar_e_atualizar(forcar=True)
+            atualizou = self.updater_facade.forcar_atualizacao()
             self.after(0, lambda: self._on_force_update_result(atualizou))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -446,32 +480,37 @@ class ControllerWindow(tk.Tk):
         self.log_text = scrolledtext.ScrolledText(parent, height=14)
         self.log_text.pack(fill="both", expand=True)
 
-        # Logs chegam de threads em segundo plano (ex.: ControllerTransport,
-        # que roda numa thread própria) — nunca é seguro mexer em widget Tk
-        # fora da thread principal, então o handler só enfileira (thread-safe)
-        # e quem realmente insere no widget é o polling abaixo, na main loop.
-        self._log_queue: "queue.Queue[str]" = queue.Queue()
+        # Lê o arquivo de log direto do disco (logging_setup.py) em vez de
+        # um handler de logging pendurado em memória - só funcionava porque
+        # janela e serviço sempre foram o mesmo processo (Windows, ver
+        # run_windows em main.py). No Linux a janela pode estar num
+        # processo separado do serviço (ver run_linux_gui) - tailar o
+        # arquivo funciona igual nos dois casos, sem manter dois jeitos
+        # diferentes de mostrar log.
+        self._log_path: Path | None = None
+        self._log_pos = 0
+        self._poll_log_file()
 
-        class GuiLogHandler(logging.Handler):
-            def __init__(self, log_queue):
-                super().__init__()
-                self.log_queue = log_queue
+    def _poll_log_file(self) -> None:
+        from logging_setup import app_dir, nome_log_de_hoje
 
-            def emit(self, record):
-                self.log_queue.put(self.format(record))
+        caminho_hoje = nome_log_de_hoje(app_dir() / "logs")
+        if caminho_hoje != self._log_path:
+            self._log_path = caminho_hoje
+            self._log_pos = 0  # virou o dia (ou é a primeira vez) - começa do zero desse arquivo
 
-        logging.getLogger().addHandler(GuiLogHandler(self._log_queue))
-        self._poll_log_queue()
+        try:
+            with open(self._log_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self._log_pos)
+                novo_conteudo = f.read()
+                self._log_pos = f.tell()
+        except FileNotFoundError:
+            novo_conteudo = ""
 
-    def _poll_log_queue(self) -> None:
-        while True:
-            try:
-                msg = self._log_queue.get_nowait()
-            except queue.Empty:
-                break
-            self.log_text.insert(tk.END, msg + "\n")
+        if novo_conteudo:
+            self.log_text.insert(tk.END, novo_conteudo)
             self.log_text.see(tk.END)
-        self.after(200, self._poll_log_queue)
+        self.after(500, self._poll_log_file)
 
     # ------------------------------------------------------------------ #
 
